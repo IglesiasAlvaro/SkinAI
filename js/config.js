@@ -6,12 +6,12 @@
  */
 
 const SkinAIConfig = (() => {
-  // Clave de almacenamiento en localStorage para recordar la URL configurada por el usuario
+  // Clave de almacenamiento en Render para recordar la URL configurada por el usuario
   const STORAGE_KEY_API_URL = 'skinai_api_base_url';
   const STORAGE_KEY_DEMO_MODE = 'skinai_demo_mode_enabled';
 
-  // URL por defecto del backend FastAPI (cuando se ejecuta localmente con uvicorn)
-  const DEFAULT_API_BASE_URL = 'http://localhost:8000';
+  // URL por defecto del backend FastAPI (cuando se ejecuta con uvicorn)
+   const DEFAULT_API_BASE_URL = 'https://skinai-backend-ena4.onrender.com';
 
   // Límite de tamaño de archivo (10 MB exactos en bytes)
   const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10,485,760 bytes
