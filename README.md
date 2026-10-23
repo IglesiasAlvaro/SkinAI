@@ -4,13 +4,13 @@ Aplicación web moderna, accesible y adaptable para la clasificación experiment
 
 ---
 
-## 🎯 Objetivo del Proyecto
+## Objetivo del Proyecto
 
 Proporcionar una interfaz gráfica intuitiva, profesional y rigurosa para estudiantes e investigadores de Ingeniería de Sistemas y ciencias de la salud. Permite seleccionar una imagen dermatoscópica, previsualizarla con validación local y enviarla mediante `multipart/form-data` al backend de **FastAPI** (`POST /predict`) para recibir y visualizar las puntuaciones Softmax de las siete clases cutáneas estudiadas.
 
 ---
 
-## 📁 Estructura del Proyecto
+##  Estructura del Proyecto
 
 ```text
 SkinAI/
@@ -28,7 +28,7 @@ SkinAI/
 
 ---
 
-## 🔬 Las 7 Clases Dermatológicas Evaluadas
+##  Las 7 Clases Dermatológicas Evaluadas
 
 El modelo fue entrenado con las 7 categorías diagnósticas de HAM10000, respetando el mapeo oficial:
 
@@ -44,7 +44,7 @@ El modelo fue entrenado con las 7 categorías diagnósticas de HAM10000, respeta
 
 ---
 
-## 🚀 Cómo Ejecutar la Web Localmente
+##  Cómo Ejecutar la Web Localmente
 
 La aplicación está construida con **HTML5 estándar, CSS3 moderno y JavaScript ES6 modular** sin dependencias externas pesadas, por lo que no requiere `npm install` ni compilación.
 
@@ -65,7 +65,7 @@ Luego abre en tu navegador: `http://localhost:3000`.
 
 ---
 
-## 🔌 Integración y Conexión con FastAPI
+## Integración y Conexión con FastAPI
 
 La interfaz se comunica con el backend mediante dos endpoints clave:
 * `GET /health`: Comprueba el estado del servidor y del modelo cargado en memoria.
@@ -78,7 +78,7 @@ Puedes configurar la dirección del backend de dos formas:
 
 ---
 
-### ⚠️ Importante para estudiantes: Backend en Google Colab vs. Computador Local
+###  Importante para estudiantes: Backend en Google Colab vs. Computador Local
 
 Si el modelo y el archivo `main.py` de FastAPI se encuentran ejecutándose en una celda de **Google Colab**:
 
@@ -118,7 +118,7 @@ Para conectar el frontend con FastAPI tienes dos alternativas:
 
 ---
 
-### 🛡️ Habilitar CORS en FastAPI (Requisito indispensable)
+### Habilitar CORS en FastAPI (Requisito indispensable)
 
 Para que el navegador permita enviar peticiones desde `index.html` hacia la API, `main.py` debe tener configurado el middleware de CORS:
 
@@ -140,7 +140,7 @@ app.add_middleware(
 
 ---
 
-## 🧪 Modo Demostración Académica
+## Modo Demostración Académica
 
 Si aún no has iniciado el backend o estás en una presentación académica sin acceso a la GPU, puedes activar el **Modo Demostración**:
 1. Haz clic en el indicador de la API en la barra superior.
@@ -149,6 +149,6 @@ Si aún no has iniciado el backend o estás en una presentación académica sin 
 
 ---
 
-## ⚖️ Aviso Médico y Legal
+##  Aviso Médico y Legal
 
 > **“SkinAI es un prototipo académico experimental y no constituye un dispositivo médico. Sus resultados no confirman ni descartan enfermedades, no sustituyen la evaluación de un profesional de salud y no deben utilizarse para decidir tratamientos. Si tienes una lesión que te preocupa, consulta a un profesional sanitario”.**
