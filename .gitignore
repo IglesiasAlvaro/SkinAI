@@ -1,0 +1,16 @@
+# Archivos del sistema y temporales
+.DS_Store
+Thumbs.db
+desktop.ini
+*.tmp
+*.log
+
+# Entornos y caches
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Backups y temporales de prueba
+*.bak
+scratch/

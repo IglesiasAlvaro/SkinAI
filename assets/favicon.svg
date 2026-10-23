@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="skinAiGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a" />
+      <stop offset="100%" stop-color="#0369a1" />
+    </linearGradient>
+    <linearGradient id="tealGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#06b6d4" />
+      <stop offset="100%" stop-color="#0d9488" />
+    </linearGradient>
+  </defs>
+  <!-- Background squircle -->
+  <rect width="64" height="64" rx="16" fill="url(#skinAiGrad)" />
+  <!-- Medical cross / derm lens stylized -->
+  <circle cx="32" cy="32" r="20" fill="none" stroke="url(#tealGrad)" stroke-width="3" stroke-dasharray="4 2" />
+  <circle cx="32" cy="32" r="14" fill="none" stroke="#ffffff" stroke-width="2.5" opacity="0.3" />
+  <path d="M32 18v28M18 32h28" stroke="url(#tealGrad)" stroke-width="4" stroke-linecap="round" />
+  <circle cx="32" cy="32" r="5" fill="#38bdf8" />
+  <!-- Small AI node dots -->
+  <circle cx="21" cy="21" r="2.5" fill="#ffffff" />
+  <circle cx="43" cy="21" r="2.5" fill="#ffffff" />
+  <circle cx="43" cy="43" r="2.5" fill="#ffffff" />
+  <circle cx="21" cy="43" r="2.5" fill="#ffffff" />
+</svg>
