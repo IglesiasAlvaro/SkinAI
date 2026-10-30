@@ -20,6 +20,7 @@ document.addEventListener('DOMContentLoaded', () => {
     previewFileSize: document.getElementById('previewFileSize'),
     previewDimensions: document.getElementById('previewDimensions'),
     previewMimeType: document.getElementById('previewMimeType'),
+    changeImageBtn: document.getElementById('changeImageBtn'),
     removeImageBtn: document.getElementById('removeImageBtn'),
     analyzeBtn: document.getElementById('analyzeBtn'),
 
@@ -101,14 +102,25 @@ document.addEventListener('DOMContentLoaded', () => {
      GESTIÓN DE EVENTOS
      ========================================================================== */
   function setupEventListeners() {
+    // Botón para cambiar imagen
+    if (elements.changeImageBtn) {
+      elements.changeImageBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        elements.fileInput.click();
+      });
+    }
+
     // Botón para quitar imagen
     elements.removeImageBtn.addEventListener('click', (e) => {
+      e.preventDefault();
       e.stopPropagation();
       resetImageSelection();
     });
 
     // Botón para iniciar análisis
     elements.analyzeBtn.addEventListener('click', (e) => {
+      e.preventDefault();
       e.stopPropagation();
       handleStartAnalysis();
     });
@@ -152,16 +164,24 @@ document.addEventListener('DOMContentLoaded', () => {
     const dropZone = elements.dropZone;
     const fileInput = elements.fileInput;
 
-    // Abrir selector al hacer clic en la zona (si no hay imagen cargada)
+    // Prevenir que clics dentro del área de vista previa activen el selector de archivos
+    if (elements.previewArea) {
+      elements.previewArea.addEventListener('click', (e) => {
+        e.stopPropagation();
+      });
+    }
+
+    // Abrir selector al hacer clic en la zona (únicamente si NO hay imagen cargada ni se está analizando)
     dropZone.addEventListener('click', (e) => {
-      if (!state.selectedFile && e.target !== elements.removeImageBtn && e.target !== elements.analyzeBtn) {
-        fileInput.click();
+      if (state.selectedFile || state.isAnalyzing || e.target.closest('#previewArea')) {
+        return;
       }
+      fileInput.click();
     });
 
     // Soporte para accesibilidad con teclado (Enter o Espacio)
     dropZone.addEventListener('keydown', (e) => {
-      if (!state.selectedFile && (e.key === 'Enter' || e.key === ' ')) {
+      if (!state.selectedFile && !state.isAnalyzing && (e.key === 'Enter' || e.key === ' ')) {
         e.preventDefault();
         fileInput.click();
       }
@@ -179,7 +199,7 @@ document.addEventListener('DOMContentLoaded', () => {
       dropZone.addEventListener(eventName, (e) => {
         e.preventDefault();
         e.stopPropagation();
-        if (!state.isAnalyzing) {
+        if (!state.isAnalyzing && !state.selectedFile) {
           dropZone.classList.add('drag-active');
         }
       });
@@ -266,10 +286,14 @@ document.addEventListener('DOMContentLoaded', () => {
     };
     tempImg.src = state.previewUrl;
 
-    // Cambiar vista de dropzone a vista previa
+    // Cambiar vista de dropzone a vista previa y aplicar clase de estado
+    elements.dropZone.classList.add('has-file');
     elements.dropZonePrompt.classList.add('hidden');
     elements.previewArea.classList.remove('hidden');
     elements.analyzeBtn.disabled = false;
+
+    // Limpiar el selector para permitir re-seleccionar la misma imagen si el usuario la vuelve a elegir
+    resetFileInputOnly();
   }
 
   function resetImageSelection() {
@@ -279,10 +303,12 @@ document.addEventListener('DOMContentLoaded', () => {
       state.previewUrl = null;
     }
     resetFileInputOnly();
+    elements.dropZone.classList.remove('has-file');
     elements.imagePreview.src = '';
     elements.previewArea.classList.add('hidden');
     elements.dropZonePrompt.classList.remove('hidden');
     elements.scannerOverlay.classList.add('hidden');
+    elements.analyzeBtn.disabled = true;
     hideNotification();
     hideResults();
   }
@@ -295,7 +321,16 @@ document.addEventListener('DOMContentLoaded', () => {
      FLUJO DE ANÁLISIS DE LA IMAGEN
      ========================================================================== */
   async function handleStartAnalysis() {
-    if (!state.selectedFile || state.isAnalyzing) return;
+    if (!state.selectedFile) {
+      showNotification(
+        'warning',
+        'Selecciona una imagen',
+        'Por favor selecciona primero una imagen dermatológica antes de iniciar el análisis.'
+      );
+      return;
+    }
+
+    if (state.isAnalyzing) return;
 
     hideNotification();
     hideResults();
@@ -303,10 +338,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Simulación de pasos de procesamiento visual para feedback claro
     updateLoadingStep(1, 'Validando imagen en memoria del cliente...');
-    await delay(350);
+    await delay(300);
 
-    updateLoadingStep(2, 'Preparando payload multipart/form-data...');
-    await delay(350);
+    updateLoadingStep(2, 'Preparando payload multipart/form-data (campo "file")...');
+    await delay(300);
+
+    let coldStartNoticeTimer = null;
 
     try {
       let inferenceResult;
@@ -314,10 +351,18 @@ document.addEventListener('DOMContentLoaded', () => {
       // Si el modo demostración está activo, usar simulación claramente etiquetada
       if (state.demoMode) {
         updateLoadingStep(3, 'Generando puntuaciones (Modo Demostración activo)...');
-        await delay(900);
+        await delay(800);
         inferenceResult = SkinAIApi.generateDemoScores();
       } else {
         updateLoadingStep(3, 'Enviando imagen a FastAPI (POST /predict)...');
+
+        // Aviso si el backend en Render tarda debido al arranque en frío (cold start)
+        coldStartNoticeTimer = setTimeout(() => {
+          if (state.isAnalyzing) {
+            updateLoadingStep(3, 'Conectando con el servidor en la nube... Si el backend estaba en reposo (arranque en frío de Render), puede demorar 30-45 segundos.');
+          }
+        }, 4000);
+
         // Petición real al backend
         inferenceResult = await SkinAIApi.predictImage(state.selectedFile);
       }
@@ -334,8 +379,10 @@ document.addEventListener('DOMContentLoaded', () => {
       // Mostrar mensaje de error descriptivo con opciones prácticas
       const isConnectionIssue = err.message && (
         err.message.includes('No se pudo contactar') || 
+        err.message.includes('No se pudo conectar') || 
         err.message.includes('Failed to fetch') ||
-        err.message.includes('Timeout')
+        err.message.includes('Timeout') ||
+        err.message.includes('Tiempo de espera')
       );
 
       const actionHtml = isConnectionIssue ? `
@@ -365,6 +412,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
     } finally {
+      if (coldStartNoticeTimer) clearTimeout(coldStartNoticeTimer);
       setAnalyzingState(false);
     }
   }
@@ -373,6 +421,9 @@ document.addEventListener('DOMContentLoaded', () => {
     state.isAnalyzing = isAnalyzing;
     elements.analyzeBtn.disabled = isAnalyzing;
     elements.removeImageBtn.disabled = isAnalyzing;
+    if (elements.changeImageBtn) {
+      elements.changeImageBtn.disabled = isAnalyzing;
+    }
 
     if (isAnalyzing) {
       elements.scannerOverlay.classList.remove('hidden');
@@ -607,9 +658,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Restaurar URL por defecto
     elements.resetUrlBtn.addEventListener('click', () => {
-      SkinAIConfig.resetApiBaseUrl();
-      elements.apiUrlInput.value = SkinAIConfig.DEFAULT_API_BASE_URL;
-      showConnectionFeedback('info', 'URL restaurada al valor predeterminado (http://localhost:8000). Haz clic en "Comprobar" para verificar.');
+      const defUrl = SkinAIConfig.resetApiBaseUrl();
+      elements.apiUrlInput.value = defUrl;
+      showConnectionFeedback('info', `URL restaurada al valor predeterminado (${defUrl}). Haz clic en "Comprobar" para verificar.`);
     });
 
     // Guardar configuración

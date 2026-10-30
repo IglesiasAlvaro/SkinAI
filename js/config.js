@@ -10,8 +10,32 @@ const SkinAIConfig = (() => {
   const STORAGE_KEY_API_URL = 'skinai_api_base_url';
   const STORAGE_KEY_DEMO_MODE = 'skinai_demo_mode_enabled';
 
-  // URL por defecto del backend FastAPI (cuando se ejecuta con uvicorn)
-   const DEFAULT_API_BASE_URL = 'https://skinai-backend-ena4.onrender.com';
+  // URLs de los entornos de ejecución
+  const PRODUCTION_API_BASE_URL = 'https://skinai-backend-ena4.onrender.com';
+  const LOCAL_API_BASE_URL = 'http://127.0.0.1:8000';
+
+  /**
+   * Determina la URL predeterminada según el entorno de ejecución:
+   * - En producción (GitHub Pages o dominio público): Render (https://skinai-backend-ena4.onrender.com)
+   * - En desarrollo local (localhost / 127.0.0.1 / file://): Backend local (http://127.0.0.1:8000)
+   */
+  function getDefaultApiBaseUrl() {
+    try {
+      if (typeof window !== 'undefined' && window.location) {
+        const hostname = window.location.hostname;
+        const protocol = window.location.protocol;
+
+        // Entorno local: localhost, 127.0.0.1 o archivo local file://
+        if (hostname === 'localhost' || hostname === '127.0.0.1' || protocol === 'file:') {
+          return LOCAL_API_BASE_URL;
+        }
+      }
+    } catch (_) {}
+    return PRODUCTION_API_BASE_URL;
+  }
+
+  // URL por defecto para el entorno actual
+  const DEFAULT_API_BASE_URL = getDefaultApiBaseUrl();
 
   // Límite de tamaño de archivo (10 MB exactos en bytes)
   const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10,485,760 bytes
@@ -22,8 +46,8 @@ const SkinAIConfig = (() => {
   // Extensiones de archivo válidas para verificación de nombre
   const ALLOWED_EXTENSIONS = ['.jpg', '.jpeg', '.png'];
 
-  // Tiempo límite para peticiones HTTP (en milisegundos: 25 segundos)
-  const REQUEST_TIMEOUT_MS = 25000;
+  // Tiempo límite para peticiones HTTP (75 segundos para tolerar el arranque en frío de Render)
+  const REQUEST_TIMEOUT_MS = 75000;
 
   /**
    * Diccionario oficial de las siete clases dermatológicas entrenadas con HAM10000.
@@ -101,7 +125,7 @@ const SkinAIConfig = (() => {
     } catch (e) {
       console.warn('No se pudo acceder a localStorage para recuperar la URL de la API:', e);
     }
-    return DEFAULT_API_BASE_URL;
+    return getDefaultApiBaseUrl();
   }
 
   /**
@@ -118,7 +142,7 @@ const SkinAIConfig = (() => {
   }
 
   /**
-   * Restablece la URL base al valor por defecto (localhost)
+   * Restablece la URL base al valor predeterminado del entorno actual
    */
   function resetApiBaseUrl() {
     try {
@@ -126,7 +150,7 @@ const SkinAIConfig = (() => {
     } catch (e) {
       console.warn('Error al limpiar localStorage:', e);
     }
-    return DEFAULT_API_BASE_URL;
+    return getDefaultApiBaseUrl();
   }
 
   /**
@@ -156,12 +180,17 @@ const SkinAIConfig = (() => {
    * Normaliza la URL eliminando barras finales
    */
   function cleanUrl(url) {
-    if (!url) return DEFAULT_API_BASE_URL;
-    return url.replace(/\/+$/, '');
+    if (!url) return getDefaultApiBaseUrl();
+    return url.trim().replace(/\/+$/, '');
   }
 
   return {
-    DEFAULT_API_BASE_URL,
+    PRODUCTION_API_BASE_URL,
+    LOCAL_API_BASE_URL,
+    getDefaultApiBaseUrl,
+    get DEFAULT_API_BASE_URL() {
+      return getDefaultApiBaseUrl();
+    },
     MAX_FILE_SIZE_BYTES,
     ALLOWED_MIME_TYPES,
     ALLOWED_EXTENSIONS,

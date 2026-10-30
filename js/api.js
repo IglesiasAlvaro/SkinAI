@@ -22,7 +22,8 @@ const SkinAIApi = (() => {
     const targetUrl = `${baseUrl}/health`;
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 7000); // 7s timeout para health
+    // 45s de tiempo límite para tolerar el arranque en frío de Render si estaba inactivo
+    const timeoutId = setTimeout(() => controller.abort(), 45000);
 
     try {
       const response = await fetch(targetUrl, {
@@ -56,9 +57,9 @@ const SkinAIApi = (() => {
 
       let errorMessage = 'No se pudo establecer conexión con el servidor.';
       if (err.name === 'AbortError') {
-        errorMessage = 'Tiempo de espera agotado (Timeout) al consultar GET /health.';
+        errorMessage = 'Tiempo de espera agotado al consultar GET /health. Si el backend en Render estaba suspendido, el arranque en frío puede tomar hasta 50 segundos.';
       } else if (err.message && err.message.includes('Failed to fetch')) {
-        errorMessage = `No se pudo conectar a "${targetUrl}". Verifica que el servidor FastAPI esté encendido y que tenga CORS habilitado.`;
+        errorMessage = `No se pudo conectar a "${targetUrl}". Verifica tu conexión y que el servidor backend esté en línea.`;
       } else {
         errorMessage = err.message || errorMessage;
       }
@@ -170,14 +171,14 @@ const SkinAIApi = (() => {
       clearTimeout(timeoutId);
 
       if (err.name === 'AbortError') {
-        throw new Error(`Tiempo de espera agotado (${SkinAIConfig.REQUEST_TIMEOUT_MS / 1000}s). El backend de FastAPI tardó demasiado en responder.`);
+        throw new Error(`Tiempo de espera agotado (${SkinAIConfig.REQUEST_TIMEOUT_MS / 1000}s). Si el backend en Render estaba suspendido, el arranque en frío puede demorar unos segundos adicionales. Por favor reintenta ahora que ya está activo.`);
       }
 
       // Si es un error de conexión de red típico del navegador
       if (err.message && (err.message.includes('Failed to fetch') || err.message.includes('NetworkError'))) {
         throw new Error(
-          `No se pudo contactar a la API en "${targetUrl}". ` +
-          `Asegúrate de que uvicorn esté ejecutándose y de que tu navegador permita la conexión.`
+          `No se pudo conectar con el servidor en "${targetUrl}". ` +
+          `Verifica tu conexión a internet o si el backend está iniciando.`
         );
       }
 

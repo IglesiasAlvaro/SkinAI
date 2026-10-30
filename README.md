@@ -4,7 +4,21 @@ Aplicación web moderna, accesible y adaptable para la clasificación experiment
 
 ---
 
-## Objetivo del Proyecto
+## 🌐 Despliegues y URLs Públicas
+
+El proyecto cuenta con entornos tanto en producción como en desarrollo local:
+
+* **Frontend Web:** [https://iglesiasalvaro.github.io/SkinAI/](https://iglesiasalvaro.github.io/SkinAI/) (Desplegado en GitHub Pages).
+* **Backend FastAPI en Producción:** [https://skinai-backend-ena4.onrender.com](https://skinai-backend-ena4.onrender.com) (Desplegado en Render).
+* **Backend FastAPI en Local:** `http://127.0.0.1:8000` (Ejecutándose localmente con Uvicorn).
+
+> [!NOTE]
+> **Arranque en frío en Render (Free Tier):**
+> El servidor en Render entra en suspensión tras periodos de inactividad. La primera petición puede tardar entre 30 y 45 segundos mientras se levanta la máquina virtual y se carga el modelo TensorFlow en memoria. Las peticiones subsiguientes responden en 1-2 segundos. El frontend está configurado con un tiempo de espera de 75 segundos e incluye alertas visuales automáticas.
+
+---
+
+## 🎯 Objetivo del Proyecto
 
 Proporcionar una interfaz gráfica intuitiva, profesional y rigurosa para estudiantes e investigadores de Ingeniería de Sistemas y ciencias de la salud. Permite seleccionar una imagen dermatoscópica, previsualizarla con validación local y enviarla mediante `multipart/form-data` al backend de **FastAPI** (`POST /predict`) para recibir y visualizar las puntuaciones Softmax de las siete clases cutáneas estudiadas.
 
