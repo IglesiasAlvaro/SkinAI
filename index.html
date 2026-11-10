@@ -44,6 +44,7 @@
           <li><a href="#analizador" class="nav-link">Analizador</a></li>
           <li><a href="#proyecto" class="nav-link">Información</a></li>
           <li><a href="#aviso-medico" class="nav-link">Aviso Médico</a></li>
+          <li><a href="#chat" id="navChatLink" class="nav-link nav-chat-pill">Asistente IA</a></li>
         </ul>
       </nav>
 
@@ -356,6 +357,10 @@
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                 Exportar JSON de predicción
               </button>
+              <button type="button" id="askChatAboutResultBtn" class="btn btn-subtle">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+                Consultar en Asistente IA
+              </button>
             </div>
           </div>
         </div>
@@ -560,20 +565,55 @@
 
       <div class="modal-body">
         <p class="modal-intro">
-          Configura la dirección URL base donde se encuentra ejecutándose el backend de SkinAI (FastAPI). Por defecto se conecta automáticamente a la API en producción (Render) o a tu entorno local.
+          Configura las direcciones URL de los dos microservicios de SkinAI: el servicio de <strong>Predicción</strong> (FastAPI + EfficientNetB0) y el servicio de <strong>Chatbot RAG</strong> (FastAPI + Gemini + Supabase).
         </p>
 
+        <!-- SELECTOR DE ENTORNO RÁPIDO -->
+        <div class="env-selector-card">
+          <label class="form-label" for="envSelector">Entorno Activo</label>
+          <div class="env-toggle-buttons" id="envToggleGroup">
+            <button type="button" class="btn-env-opt active" data-env="auto">Automático (Detectar)</button>
+            <button type="button" class="btn-env-opt" data-env="production">Producción (Render)</button>
+            <button type="button" class="btn-env-opt" data-env="local">Local (127.0.0.1)</button>
+          </div>
+          <span class="form-hint" id="envActiveHint">Entorno actual: Detectado según origen de la página.</span>
+        </div>
+
         <form id="apiConfigForm" class="config-form" onsubmit="return false;">
+          <!-- SERVICIO 1: PREDICCIÓN -->
           <div class="form-group">
-            <label for="apiUrlInput" class="form-label">URL Base de la API</label>
-            <div class="input-with-button">
-              <input type="url" id="apiUrlInput" class="form-input" placeholder="https://skinai-backend-ena4.onrender.com" spellcheck="false" required>
-              <button type="button" id="testConnectionBtn" class="btn btn-secondary">
-                <span>Comprobar</span>
-                <div class="btn-spinner hidden" id="testSpinner"></div>
-              </button>
+            <div class="service-config-header">
+              <label for="predictUrlInput" class="form-label">
+                <strong>Servicio de Predicción (POST /predict)</strong>
+              </label>
+              <span id="predictStatusBadge" class="service-status-badge checking">Verificando</span>
             </div>
-            <span class="form-hint">Ruta probada: <code>{URL}/health</code> y <code>{URL}/predict</code></span>
+            <div class="input-with-button">
+              <input type="url" id="predictUrlInput" class="form-input" placeholder="https://skinai-backend-ena4.onrender.com" spellcheck="false" required>
+            </div>
+            <span class="form-hint">Ruta de salud: <code>{URL}/health</code> | Predicción: <code>{URL}/predict</code></span>
+          </div>
+
+          <!-- SERVICIO 2: CHATBOT RAG -->
+          <div class="form-group">
+            <div class="service-config-header">
+              <label for="chatUrlInput" class="form-label">
+                <strong>Servicio de Chatbot RAG (POST /chat)</strong>
+              </label>
+              <span id="chatStatusBadge" class="service-status-badge checking">Verificando</span>
+            </div>
+            <div class="input-with-button">
+              <input type="url" id="chatUrlInput" class="form-input" placeholder="https://skinai-backend-chat.onrender.com" spellcheck="false" required>
+            </div>
+            <span class="form-hint">Ruta de salud: <code>{URL}/health</code> | Chat RAG: <code>{URL}/chat</code></span>
+          </div>
+
+          <!-- BOTÓN GLOBAL DE PRUEBA DE CONEXIONES -->
+          <div class="test-connections-wrap">
+            <button type="button" id="testConnectionBtn" class="btn btn-secondary w-full">
+              <span>Comprobar ambas conexiones</span>
+              <div class="btn-spinner hidden" id="testSpinner"></div>
+            </button>
           </div>
 
           <div id="connectionFeedback" class="connection-feedback hidden" aria-live="polite">
@@ -584,25 +624,25 @@
           <div class="colab-info-accordion">
             <div class="accordion-header" id="colabAccordionToggle">
               <span class="acc-icon">💡</span>
-              <span class="acc-title">¿Tu backend está ejecutándose en Google Colab o en Local?</span>
+              <span class="acc-title">Información de los dos servicios en Render y Local</span>
               <span class="acc-arrow">▼</span>
             </div>
             <div class="accordion-body hidden" id="colabAccordionBody">
               <p>
-                <strong>Entornos disponibles:</strong>
+                <strong>Arquitectura desacoplada en dos servicios:</strong>
               </p>
               <ol class="solution-list">
                 <li>
-                  <strong>Producción en la nube (Render):</strong>
-                  Por defecto en internet la web conecta con <code>https://skinai-backend-ena4.onrender.com</code>. Nota: los servicios gratuitos de Render pueden tardar hasta 50 segundos en reactivarse si han estado inactivos.
+                  <strong>Servicio de Predicción:</strong>
+                  <code>https://skinai-backend-ena4.onrender.com</code> (o en local <code>http://127.0.0.1:8000</code>). Expone <code>GET /health</code> y <code>POST /predict</code>.
                 </li>
                 <li>
-                  <strong>Desarrollo local en tu PC:</strong>
-                  Si ejecutas <code>uvicorn main:app --host 127.0.0.1 --port 8000</code>, la URL es <code>http://127.0.0.1:8000</code>.
+                  <strong>Servicio de Chatbot RAG:</strong>
+                  <code>https://skinai-backend-chat.onrender.com</code> (o en local <code>http://127.0.0.1:8001</code>). Expone <code>GET /health</code> y <code>POST /chat</code>.
                 </li>
                 <li>
-                  <strong>Google Colab:</strong>
-                  Si usas Colab, debes exponerlo mediante un túnel (como <code>pyngrok</code>) y pegar la URL HTTPS resultante.
+                  <strong>Arranque en frío en Render:</strong>
+                  Los servidores gratuitos se duermen por inactividad y pueden tardar 1-2 minutos la primera vez. Se realiza un despertar silencioso al cargar la página.
                 </li>
               </ol>
             </div>
@@ -626,6 +666,69 @@
         <button type="button" id="resetUrlBtn" class="btn btn-subtle">Restaurar predeterminado</button>
         <button type="button" id="saveApiConfigBtn" class="btn btn-primary">Guardar configuración</button>
       </div>
+    </div>
+  </div>
+
+
+  <!-- ASISTENTE DERMATOLÓGICO RAG (CHATBOT FLOTANTE) -->
+  <div id="skinaiChatWidget" class="chat-widget">
+    <!-- Botón flotante para abrir/cerrar -->
+    <button type="button" id="chatToggleBtn" class="chat-toggle-btn" aria-label="Abrir asistente virtual SkinAI" aria-expanded="false">
+      <div class="chat-toggle-icon-wrap">
+        <svg class="icon-chat-open" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+        </svg>
+        <span class="icon-chat-close hidden">&times;</span>
+      </div>
+      <span class="chat-toggle-label">Asistente IA</span>
+    </button>
+
+    <!-- Ventana / Drawer de conversación -->
+    <div id="chatDrawer" class="chat-drawer hidden" role="region" aria-label="Asistente virtual SkinAI">
+      <div class="chat-header">
+        <div class="chat-header-main">
+          <div class="chat-avatar-badge">🩺</div>
+          <div class="chat-header-text">
+            <h4 class="chat-header-title">Asistente Dermatológico RAG</h4>
+            <span class="chat-header-sub">SkinAI Informative Assistant &bull; Gemini RAG</span>
+          </div>
+        </div>
+        <button type="button" id="chatCloseBtn" class="chat-header-close" aria-label="Cerrar asistente">&times;</button>
+      </div>
+
+      <!-- Historial de mensajes -->
+      <div id="chatMessages" class="chat-messages" aria-live="polite">
+        <div class="chat-msg-row bot">
+          <div class="chat-msg-bubble">
+            <p>👋 <strong>¡Hola!</strong> Soy el asistente informativo de SkinAI. Puedes consultarme dudas generales sobre las 7 clases cutáneas (nevo, melanoma, queratosis, etc.) o sobre la metodología del modelo.</p>
+            <div class="chat-disclaimer-pill">Aviso: Prototipo académico experimental. No emito diagnósticos médicos.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sugerencias de preguntas rápidas -->
+      <div class="chat-chips-container" id="chatChipsContainer">
+        <button type="button" class="chat-chip" data-question="¿Qué es el melanoma y cuáles son sus signos de alerta?">¿Qué es el melanoma?</button>
+        <button type="button" class="chat-chip" data-question="¿Cuál es la diferencia entre un nevo melanocítico y un melanoma?">Nevo vs Melanoma</button>
+        <button type="button" class="chat-chip" data-question="¿Qué es la queratosis actínica (akiec)?">¿Qué es akiec?</button>
+      </div>
+
+      <!-- Aviso visual si el servidor tarda más de 8 segundos en responder -->
+      <div id="chatWakingNotice" class="chat-waking-notice hidden" aria-live="polite">
+        <div class="waking-spinner"></div>
+        <span id="chatWakingText">El servidor está despertando, esto puede tardar hasta un minuto...</span>
+      </div>
+
+      <!-- Formulario de entrada -->
+      <form id="chatForm" class="chat-form" onsubmit="return false;">
+        <input type="text" id="chatInput" class="chat-input" placeholder="Escribe tu consulta sobre lesiones..." maxlength="500" autocomplete="off" required>
+        <button type="submit" id="chatSendBtn" class="chat-submit-btn" aria-label="Enviar consulta">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+            <line x1="22" y1="2" x2="11" y2="13"></line>
+            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+          </svg>
+        </button>
+      </form>
     </div>
   </div>
 

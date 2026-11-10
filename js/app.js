@@ -3,7 +3,7 @@
  * 
  * Gestiona la interacción del usuario: arrastrar y soltar, vista previa con
  * metadatos reales, validación de 10 MB, escáner visual, visualización de las
- * siete clases y modal de configuración de la API de FastAPI.
+ * siete clases, asistente virtual RAG (chatbot) y configuración dual de la API.
  */
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -49,6 +49,7 @@ document.addEventListener('DOMContentLoaded', () => {
     copyResultsBtn: document.getElementById('copyResultsBtn'),
     downloadJsonBtn: document.getElementById('downloadJsonBtn'),
     analyzeNewBtn: document.getElementById('analyzeNewBtn'),
+    askChatAboutResultBtn: document.getElementById('askChatAboutResultBtn'),
 
     // Estado API y Modal
     apiStatusBtn: document.getElementById('apiStatusBtn'),
@@ -56,7 +57,12 @@ document.addEventListener('DOMContentLoaded', () => {
     apiModal: document.getElementById('apiModal'),
     closeModalBtn: document.getElementById('closeModalBtn'),
     footerConfigBtn: document.getElementById('footerConfigBtn'),
-    apiUrlInput: document.getElementById('apiUrlInput'),
+    predictUrlInput: document.getElementById('predictUrlInput'),
+    chatUrlInput: document.getElementById('chatUrlInput'),
+    predictStatusBadge: document.getElementById('predictStatusBadge'),
+    chatStatusBadge: document.getElementById('chatStatusBadge'),
+    envToggleGroup: document.getElementById('envToggleGroup'),
+    envActiveHint: document.getElementById('envActiveHint'),
     testConnectionBtn: document.getElementById('testConnectionBtn'),
     testSpinner: document.getElementById('testSpinner'),
     connectionFeedback: document.getElementById('connectionFeedback'),
@@ -68,7 +74,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Menú móvil y navegación
     mobileMenuBtn: document.getElementById('mobileMenuBtn'),
-    mainNav: document.getElementById('mainNav')
+    mainNav: document.getElementById('mainNav'),
+    navChatLink: document.getElementById('navChatLink'),
+
+    // Asistente Chatbot RAG
+    chatWidget: document.getElementById('skinaiChatWidget'),
+    chatToggleBtn: document.getElementById('chatToggleBtn'),
+    chatDrawer: document.getElementById('chatDrawer'),
+    chatCloseBtn: document.getElementById('chatCloseBtn'),
+    chatMessages: document.getElementById('chatMessages'),
+    chatForm: document.getElementById('chatForm'),
+    chatInput: document.getElementById('chatInput'),
+    chatSendBtn: document.getElementById('chatSendBtn'),
+    chatChipsContainer: document.getElementById('chatChipsContainer'),
+    chatWakingNotice: document.getElementById('chatWakingNotice')
   };
 
   // Estado reactivo de la aplicación
@@ -76,8 +95,12 @@ document.addEventListener('DOMContentLoaded', () => {
     selectedFile: null,
     previewUrl: null,
     isAnalyzing: false,
+    isChatWaiting: false,
+    isChatOpen: false,
     lastResults: null,
     apiStatus: 'checking', // 'checking' | 'connected' | 'disconnected' | 'demo'
+    predictStatus: 'checking',
+    chatStatus: 'checking',
     demoMode: SkinAIConfig.isDemoModeEnabled()
   };
 
@@ -85,21 +108,29 @@ document.addEventListener('DOMContentLoaded', () => {
      INICIALIZACIÓN
      ========================================================================== */
   function init() {
+    // 1. Despertar silencioso de AMBOS servidores de Render al cargar la página
+    // Ignora cualquier error sin mostrárselo al usuario
+    SkinAIApi.wakeupServers();
+
+    // 2. Configurar listeners de interfaz
     setupEventListeners();
     setupDropZoneEvents();
     setupModalEvents();
+    setupChatEvents();
     setupNavigationHighlight();
-    
-    // Cargar valores iniciales en modal
-    elements.apiUrlInput.value = SkinAIConfig.getApiBaseUrl();
-    elements.demoModeSwitch.checked = state.demoMode;
 
-    // Verificar salud de la API al arrancar
+    // 3. Cargar valores en modal
+    if (elements.predictUrlInput) elements.predictUrlInput.value = SkinAIConfig.getPredictApiUrl();
+    if (elements.chatUrlInput) elements.chatUrlInput.value = SkinAIConfig.getChatApiUrl();
+    if (elements.demoModeSwitch) elements.demoModeSwitch.checked = state.demoMode;
+    updateEnvButtonsState();
+
+    // 4. Verificar estado de las conexiones en segundo plano
     checkApiConnectionStatus();
   }
 
   /* ==========================================================================
-     GESTIÓN DE EVENTOS
+     GESTIÓN DE EVENTOS GENERALES
      ========================================================================== */
   function setupEventListeners() {
     // Botón para cambiar imagen
@@ -112,47 +143,81 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Botón para quitar imagen
-    elements.removeImageBtn.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      resetImageSelection();
-    });
+    if (elements.removeImageBtn) {
+      elements.removeImageBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        resetImageSelection();
+      });
+    }
 
     // Botón para iniciar análisis
-    elements.analyzeBtn.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      handleStartAnalysis();
-    });
+    if (elements.analyzeBtn) {
+      elements.analyzeBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        handleStartAnalysis();
+      });
+    }
 
     // Cerrar notificación
-    elements.closeNotificationBtn.addEventListener('click', () => {
-      hideNotification();
-    });
+    if (elements.closeNotificationBtn) {
+      elements.closeNotificationBtn.addEventListener('click', () => {
+        hideNotification();
+      });
+    }
 
     // Analizar otra imagen
-    elements.analyzeNewBtn.addEventListener('click', () => {
-      resetImageSelection();
-      elements.dropZone.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    });
+    if (elements.analyzeNewBtn) {
+      elements.analyzeNewBtn.addEventListener('click', () => {
+        resetImageSelection();
+        elements.dropZone.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      });
+    }
+
+    // Consultar resultado en el chat
+    if (elements.askChatAboutResultBtn) {
+      elements.askChatAboutResultBtn.addEventListener('click', () => {
+        if (!state.lastResults || !state.lastResults.scores || state.lastResults.scores.length === 0) return;
+        const topCode = state.lastResults.scores[0].code;
+        const meta = SkinAIConfig.CLASSES_METADATA[topCode] || { shortName: topCode };
+        const question = `¿Qué características tiene la clase ${meta.shortName} (${topCode}) identificada por el modelo?`;
+        openChatDrawer();
+        sendUserQuestion(question);
+      });
+    }
+
+    // Enlace de chat en la barra de navegación
+    if (elements.navChatLink) {
+      elements.navChatLink.addEventListener('click', (e) => {
+        e.preventDefault();
+        toggleChatDrawer();
+      });
+    }
 
     // Copiar resultados al portapapeles
-    elements.copyResultsBtn.addEventListener('click', handleCopyResults);
+    if (elements.copyResultsBtn) {
+      elements.copyResultsBtn.addEventListener('click', handleCopyResults);
+    }
 
     // Descargar JSON de resultados
-    elements.downloadJsonBtn.addEventListener('click', handleDownloadJson);
+    if (elements.downloadJsonBtn) {
+      elements.downloadJsonBtn.addEventListener('click', handleDownloadJson);
+    }
 
     // Menú móvil
-    elements.mobileMenuBtn.addEventListener('click', () => {
-      const isOpen = elements.mainNav.classList.toggle('open');
-      elements.mobileMenuBtn.setAttribute('aria-expanded', isOpen);
-    });
+    if (elements.mobileMenuBtn) {
+      elements.mobileMenuBtn.addEventListener('click', () => {
+        const isOpen = elements.mainNav.classList.toggle('open');
+        elements.mobileMenuBtn.setAttribute('aria-expanded', isOpen);
+      });
+    }
 
     // Cerrar menú móvil al hacer clic en un enlace
     document.querySelectorAll('.nav-link').forEach(link => {
       link.addEventListener('click', () => {
-        elements.mainNav.classList.remove('open');
-        elements.mobileMenuBtn.setAttribute('aria-expanded', 'false');
+        if (elements.mainNav) elements.mainNav.classList.remove('open');
+        if (elements.mobileMenuBtn) elements.mobileMenuBtn.setAttribute('aria-expanded', 'false');
       });
     });
   }
@@ -163,6 +228,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function setupDropZoneEvents() {
     const dropZone = elements.dropZone;
     const fileInput = elements.fileInput;
+    if (!dropZone || !fileInput) return;
 
     // Prevenir que clics dentro del área de vista previa activen el selector de archivos
     if (elements.previewArea) {
@@ -230,10 +296,9 @@ document.addEventListener('DOMContentLoaded', () => {
     hideNotification();
     hideResults();
 
-    // 1. Validar presencia
     if (!file) return;
 
-    // 2. Validar tamaño (10 MB máximo)
+    // Validar tamaño (10 MB máximo)
     if (file.size > SkinAIConfig.MAX_FILE_SIZE_BYTES) {
       const sizeMB = (file.size / (1024 * 1024)).toFixed(2);
       showNotification(
@@ -245,7 +310,7 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    // 3. Validar tipo de formato (JPEG, JPG, PNG)
+    // Validar tipo de formato (JPEG, JPG, PNG)
     const fileName = file.name.toLowerCase();
     const fileMime = file.type ? file.type.toLowerCase() : '';
     const hasValidExt = SkinAIConfig.ALLOWED_EXTENSIONS.some(ext => fileName.endsWith(ext));
@@ -261,16 +326,14 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    // 4. Leer imagen y mostrar vista previa
+    // Guardar imagen en estado reactivo
     state.selectedFile = file;
 
-    // Liberar URL previa si existía
     if (state.previewUrl) {
       URL.revokeObjectURL(state.previewUrl);
     }
     state.previewUrl = URL.createObjectURL(file);
 
-    // Cargar en el elemento img y extraer dimensiones reales
     elements.imagePreview.src = state.previewUrl;
     elements.previewFileName.textContent = file.name;
     elements.previewFileSize.textContent = formatBytes(file.size);
@@ -286,13 +349,11 @@ document.addEventListener('DOMContentLoaded', () => {
     };
     tempImg.src = state.previewUrl;
 
-    // Cambiar vista de dropzone a vista previa y aplicar clase de estado
     elements.dropZone.classList.add('has-file');
     elements.dropZonePrompt.classList.add('hidden');
     elements.previewArea.classList.remove('hidden');
     elements.analyzeBtn.disabled = false;
 
-    // Limpiar el selector para permitir re-seleccionar la misma imagen si el usuario la vuelve a elegir
     resetFileInputOnly();
   }
 
@@ -303,22 +364,22 @@ document.addEventListener('DOMContentLoaded', () => {
       state.previewUrl = null;
     }
     resetFileInputOnly();
-    elements.dropZone.classList.remove('has-file');
-    elements.imagePreview.src = '';
-    elements.previewArea.classList.add('hidden');
-    elements.dropZonePrompt.classList.remove('hidden');
-    elements.scannerOverlay.classList.add('hidden');
-    elements.analyzeBtn.disabled = true;
+    if (elements.dropZone) elements.dropZone.classList.remove('has-file');
+    if (elements.imagePreview) elements.imagePreview.src = '';
+    if (elements.previewArea) elements.previewArea.classList.add('hidden');
+    if (elements.dropZonePrompt) elements.dropZonePrompt.classList.remove('hidden');
+    if (elements.scannerOverlay) elements.scannerOverlay.classList.add('hidden');
+    if (elements.analyzeBtn) elements.analyzeBtn.disabled = true;
     hideNotification();
     hideResults();
   }
 
   function resetFileInputOnly() {
-    elements.fileInput.value = '';
+    if (elements.fileInput) elements.fileInput.value = '';
   }
 
   /* ==========================================================================
-     FLUJO DE ANÁLISIS DE LA IMAGEN
+     FLUJO DE ANÁLISIS DE LA IMAGEN (POST /predict)
      ========================================================================== */
   async function handleStartAnalysis() {
     if (!state.selectedFile) {
@@ -336,19 +397,17 @@ document.addEventListener('DOMContentLoaded', () => {
     hideResults();
     setAnalyzingState(true);
 
-    // Simulación de pasos de procesamiento visual para feedback claro
     updateLoadingStep(1, 'Validando imagen en memoria del cliente...');
-    await delay(300);
+    await delay(250);
 
     updateLoadingStep(2, 'Preparando payload multipart/form-data (campo "file")...');
-    await delay(300);
+    await delay(250);
 
-    let coldStartNoticeTimer = null;
+    let wakingTimer = null;
 
     try {
       let inferenceResult;
 
-      // Si el modo demostración está activo, usar simulación claramente etiquetada
       if (state.demoMode) {
         updateLoadingStep(3, 'Generando puntuaciones (Modo Demostración activo)...');
         await delay(800);
@@ -356,89 +415,52 @@ document.addEventListener('DOMContentLoaded', () => {
       } else {
         updateLoadingStep(3, 'Enviando imagen a FastAPI (POST /predict)...');
 
-        // Aviso si el backend en Render tarda debido al arranque en frío (cold start)
-        coldStartNoticeTimer = setTimeout(() => {
+        // Muestra el mensaje si la respuesta tarda más de 8 segundos
+        wakingTimer = setTimeout(() => {
           if (state.isAnalyzing) {
-            updateLoadingStep(3, 'Conectando con el servidor en la nube... Si el backend estaba en reposo (arranque en frío de Render), puede demorar 30-45 segundos.');
+            updateLoadingStep(3, 'El servidor está despertando, esto puede tardar hasta un minuto...');
           }
-        }, 4000);
+        }, 8000);
 
-        // Petición real al backend
+        // Envía la imagen usando PREDICT_API_URL exclusivamente
         inferenceResult = await SkinAIApi.predictImage(state.selectedFile);
       }
 
       updateLoadingStep(4, 'Normalizando vector de 7 clases...');
-      await delay(250);
+      await delay(200);
 
-      // Renderizar resultados exitosos
       renderInferenceResults(inferenceResult);
 
     } catch (err) {
       console.error('Error durante el análisis:', err);
-
-      // Mostrar mensaje de error descriptivo con opciones prácticas
-      const isConnectionIssue = err.message && (
-        err.message.includes('No se pudo contactar') || 
-        err.message.includes('No se pudo conectar') || 
-        err.message.includes('Failed to fetch') ||
-        err.message.includes('Timeout') ||
-        err.message.includes('Tiempo de espera')
-      );
-
-      const actionHtml = isConnectionIssue ? `
-        <button type="button" class="btn btn-subtle-sm" id="btnOpenApiModalFromError">
-          Configurar URL de la API
-        </button>
-        <button type="button" class="btn btn-subtle-sm" id="btnEnableDemoFromError">
-          Activar Modo Demostración
-        </button>
-      ` : '';
-
-      showNotification('error', 'No se pudo completar el análisis', err.message, actionHtml);
-
-      // Enganchar listeners para las acciones del error
-      if (isConnectionIssue) {
-        const configBtn = document.getElementById('btnOpenApiModalFromError');
-        if (configBtn) configBtn.addEventListener('click', openApiModal);
-
-        const demoBtn = document.getElementById('btnEnableDemoFromError');
-        if (demoBtn) {
-          demoBtn.addEventListener('click', () => {
-            enableDemoMode(true);
-            hideNotification();
-            handleStartAnalysis(); // reintentar inmediatamente con demo
-          });
-        }
-      }
-
+      // Mensaje de error claro en español dentro de la interfaz sin pantallas en blanco
+      showNotification('error', 'No se pudo completar el análisis', err.message);
     } finally {
-      if (coldStartNoticeTimer) clearTimeout(coldStartNoticeTimer);
+      if (wakingTimer) clearTimeout(wakingTimer);
       setAnalyzingState(false);
     }
   }
 
   function setAnalyzingState(isAnalyzing) {
     state.isAnalyzing = isAnalyzing;
-    elements.analyzeBtn.disabled = isAnalyzing;
-    elements.removeImageBtn.disabled = isAnalyzing;
-    if (elements.changeImageBtn) {
-      elements.changeImageBtn.disabled = isAnalyzing;
-    }
+    if (elements.analyzeBtn) elements.analyzeBtn.disabled = isAnalyzing;
+    if (elements.removeImageBtn) elements.removeImageBtn.disabled = isAnalyzing;
+    if (elements.changeImageBtn) elements.changeImageBtn.disabled = isAnalyzing;
 
     if (isAnalyzing) {
-      elements.scannerOverlay.classList.remove('hidden');
-      elements.loadingState.classList.remove('hidden');
+      if (elements.scannerOverlay) elements.scannerOverlay.classList.remove('hidden');
+      if (elements.loadingState) elements.loadingState.classList.remove('hidden');
     } else {
-      elements.scannerOverlay.classList.add('hidden');
-      elements.loadingState.classList.add('hidden');
+      if (elements.scannerOverlay) elements.scannerOverlay.classList.add('hidden');
+      if (elements.loadingState) elements.loadingState.classList.add('hidden');
     }
   }
 
   function updateLoadingStep(stepNumber, text) {
-    elements.loadingStepText.textContent = text;
+    if (elements.loadingStepText) elements.loadingStepText.textContent = text;
     const percentages = [20, 45, 75, 95];
     const pct = percentages[stepNumber - 1] || 50;
-    elements.loadingProgressBar.style.width = `${pct}%`;
+    if (elements.loadingProgressBar) elements.loadingProgressBar.style.width = `${pct}%`;
   }
 
   /* ==========================================================================
@@ -453,7 +475,6 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    // Configurar chip de estado (si es real o demo)
     if (result.source === 'demo') {
       elements.resultsStatusChip.className = 'results-status-chip demo';
       elements.resultsChipText.textContent = 'Modo Demostración (Simulado)';
@@ -462,10 +483,8 @@ document.addEventListener('DOMContentLoaded', () => {
       elements.resultsChipText.textContent = 'Inferencia Real Completada';
     }
 
-    // Versión del modelo
     elements.modelVersionTag.textContent = `Modelo: ${result.modelVersion || 'SkinAI v2'}`;
 
-    // 1. Tarjeta destacada: Clase con mayor puntuación
     const top = scores[0];
     const topMeta = SkinAIConfig.CLASSES_METADATA[top.code] || {
       shortName: top.code,
@@ -477,7 +496,6 @@ document.addEventListener('DOMContentLoaded', () => {
     elements.topClassDesc.textContent = topMeta.description;
     elements.topClassScore.textContent = formatPercentage(top.score);
 
-    // 2. Lista completa de las 7 clases ordenadas
     elements.scoresList.innerHTML = '';
 
     scores.forEach((item, index) => {
@@ -515,34 +533,32 @@ document.addEventListener('DOMContentLoaded', () => {
 
       elements.scoresList.appendChild(row);
 
-      // Animar llenado de la barra con retraso escalonado
       setTimeout(() => {
         const fill = row.querySelector('.score-fill');
         if (fill) {
-          const widthPct = Math.max(item.score * 100, 1.5); // Mínimo 1.5% para visibilidad
+          const widthPct = Math.max(item.score * 100, 1.5);
           fill.style.width = `${widthPct}%`;
         }
-      }, 50 + index * 40);
+      }, 50 + index * 35);
     });
 
-    // Mostrar área de resultados y desplazarse suavemente
     elements.resultsArea.classList.remove('hidden');
     elements.resultsArea.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 
   function hideResults() {
-    elements.resultsArea.classList.add('hidden');
+    if (elements.resultsArea) elements.resultsArea.classList.add('hidden');
   }
 
   /* ==========================================================================
      NOTIFICACIONES DEL SISTEMA
      ========================================================================== */
   function showNotification(type, title, message, actionHtml = '') {
+    if (!elements.statusNotification) return;
     elements.statusNotification.className = `status-notification ${type}`;
     elements.notificationTitle.textContent = title;
     elements.notificationMessage.textContent = message;
     
-    // Icono según tipo
     if (type === 'error') {
       elements.notificationIcon.innerHTML = '⚠️';
     } else if (type === 'warning') {
@@ -557,11 +573,437 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function hideNotification() {
-    elements.statusNotification.classList.add('hidden');
+    if (elements.statusNotification) elements.statusNotification.classList.add('hidden');
   }
 
   /* ==========================================================================
-     ACCIONES DE RESULTADOS: COPIAR Y EXPORTAR
+     ASISTENTE DERMATOLÓGICO RAG (CHATBOT)
+     ========================================================================== */
+  function setupChatEvents() {
+    if (!elements.chatToggleBtn || !elements.chatDrawer) return;
+
+    // Abrir/cerrar chat flotante
+    elements.chatToggleBtn.addEventListener('click', toggleChatDrawer);
+
+    if (elements.chatCloseBtn) {
+      elements.chatCloseBtn.addEventListener('click', closeChatDrawer);
+    }
+
+    // Envío del formulario de chat
+    if (elements.chatForm) {
+      elements.chatForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const text = elements.chatInput.value.trim();
+        if (text) {
+          sendUserQuestion(text);
+        }
+      });
+    }
+
+    // Chips de preguntas sugeridas
+    if (elements.chatChipsContainer) {
+      elements.chatChipsContainer.addEventListener('click', (e) => {
+        const chip = e.target.closest('.chat-chip');
+        if (chip && chip.dataset.question) {
+          sendUserQuestion(chip.dataset.question);
+        }
+      });
+    }
+  }
+
+  function toggleChatDrawer() {
+    if (state.isChatOpen) {
+      closeChatDrawer();
+    } else {
+      openChatDrawer();
+    }
+  }
+
+  function openChatDrawer() {
+    state.isChatOpen = true;
+    elements.chatDrawer.classList.remove('hidden');
+    elements.chatToggleBtn.setAttribute('aria-expanded', 'true');
+    const openIcon = elements.chatToggleBtn.querySelector('.icon-chat-open');
+    const closeIcon = elements.chatToggleBtn.querySelector('.icon-chat-close');
+    if (openIcon) openIcon.classList.add('hidden');
+    if (closeIcon) closeIcon.classList.remove('hidden');
+    setTimeout(() => {
+      if (elements.chatInput) elements.chatInput.focus();
+    }, 150);
+  }
+
+  function closeChatDrawer() {
+    state.isChatOpen = false;
+    elements.chatDrawer.classList.add('hidden');
+    elements.chatToggleBtn.setAttribute('aria-expanded', 'false');
+    const openIcon = elements.chatToggleBtn.querySelector('.icon-chat-open');
+    const closeIcon = elements.chatToggleBtn.querySelector('.icon-chat-close');
+    if (openIcon) openIcon.classList.remove('hidden');
+    if (closeIcon) closeIcon.classList.add('hidden');
+  }
+
+  /**
+   * Envía una pregunta al servicio de Chatbot (POST /chat usando CHAT_API_URL exclusivamente)
+   */
+  async function sendUserQuestion(question) {
+    if (state.isChatWaiting || !question || question.trim().length < 3) return;
+
+    const cleanQ = question.trim();
+    appendChatMessage('user', cleanQ);
+    if (elements.chatInput) elements.chatInput.value = '';
+
+    setChatLoading(true);
+
+    // Muestra el mensaje si la respuesta tarda más de 8 segundos
+    const wakingTimer = setTimeout(() => {
+      if (state.isChatWaiting && elements.chatWakingNotice) {
+        elements.chatWakingNotice.classList.remove('hidden');
+      }
+    }, 8000);
+
+    try {
+      // Usar CHAT_API_URL exclusivamente para /chat
+      const response = await SkinAIApi.sendChatMessage(cleanQ);
+
+      // Renderizar respuesta del bot y fuentes si existen
+      appendChatMessage('bot', response.answer, response.sources);
+
+    } catch (err) {
+      console.error('Error en servicio de Chatbot:', err);
+      // Mensaje estándar claro en español sin errores técnicos
+      appendChatErrorMessage(err.message || 'No se pudo conectar con el servidor.');
+    } finally {
+      if (wakingTimer) clearTimeout(wakingTimer);
+      if (elements.chatWakingNotice) elements.chatWakingNotice.classList.add('hidden');
+      setChatLoading(false);
+    }
+  }
+
+  function setChatLoading(isLoading) {
+    state.isChatWaiting = isLoading;
+    if (elements.chatSendBtn) elements.chatSendBtn.disabled = isLoading;
+    if (elements.chatInput) elements.chatInput.disabled = isLoading;
+
+    if (isLoading) {
+      // Indicador de escritura
+      const typingRow = document.createElement('div');
+      typingRow.id = 'chatTypingRow';
+      typingRow.className = 'chat-msg-row bot';
+      typingRow.innerHTML = `
+        <div class="chat-msg-bubble">
+          <div class="waking-spinner" style="display:inline-block; vertical-align:middle; margin-right:6px;"></div>
+          <em>Consultando base de conocimiento RAG...</em>
+        </div>
+      `;
+      elements.chatMessages.appendChild(typingRow);
+      scrollChatToBottom();
+    } else {
+      const typingRow = document.getElementById('chatTypingRow');
+      if (typingRow) typingRow.remove();
+      if (elements.chatInput) elements.chatInput.focus();
+    }
+  }
+
+  function appendChatMessage(sender, text, sources = []) {
+    const row = document.createElement('div');
+    row.className = `chat-msg-row ${sender}`;
+
+    let sourcesHtml = '';
+    if (sources && sources.length > 0) {
+      const items = sources.map(s => `<li>${escapeHtml(s)}</li>`).join('');
+      sourcesHtml = `
+        <div class="chat-sources-block">
+          <div class="chat-sources-title">📚 Documentos consultados:</div>
+          <ul class="chat-sources-list">${items}</ul>
+        </div>
+      `;
+    }
+
+    row.innerHTML = `
+      <div class="chat-msg-bubble">
+        <p>${escapeHtml(text).replace(/\n/g, '<br>')}</p>
+        ${sourcesHtml}
+      </div>
+    `;
+
+    elements.chatMessages.appendChild(row);
+    scrollChatToBottom();
+  }
+
+  function appendChatErrorMessage(errorMsg) {
+    const row = document.createElement('div');
+    row.className = 'chat-msg-row bot';
+    row.innerHTML = `
+      <div class="chat-msg-bubble chat-msg-error">
+        <strong>⚠️ ${escapeHtml(errorMsg)}</strong>
+      </div>
+    `;
+    elements.chatMessages.appendChild(row);
+    scrollChatToBottom();
+  }
+
+  function scrollChatToBottom() {
+    if (elements.chatMessages) {
+      elements.chatMessages.scrollTop = elements.chatMessages.scrollHeight;
+    }
+  }
+
+  /* ==========================================================================
+     MODAL DE CONFIGURACIÓN Y ESTADO DE LAS APIS
+     ========================================================================== */
+  function setupModalEvents() {
+    if (elements.apiStatusBtn) elements.apiStatusBtn.addEventListener('click', openApiModal);
+    if (elements.footerConfigBtn) elements.footerConfigBtn.addEventListener('click', openApiModal);
+
+    if (elements.closeModalBtn) elements.closeModalBtn.addEventListener('click', closeApiModal);
+    if (elements.apiModal) {
+      elements.apiModal.addEventListener('click', (e) => {
+        if (e.target === elements.apiModal) closeApiModal();
+      });
+    }
+
+    // Selector rápido de entorno (auto, production, local)
+    if (elements.envToggleGroup) {
+      elements.envToggleGroup.addEventListener('click', (e) => {
+        const btn = e.target.closest('.btn-env-opt');
+        if (btn && btn.dataset.env) {
+          handleEnvironmentChange(btn.dataset.env);
+        }
+      });
+    }
+
+    // Botón para probar ambas conexiones
+    if (elements.testConnectionBtn) {
+      elements.testConnectionBtn.addEventListener('click', handleTestBothConnections);
+    }
+
+    // Acordeón Colab / Entornos
+    if (elements.colabAccordionToggle) {
+      elements.colabAccordionToggle.addEventListener('click', () => {
+        const accordion = elements.colabAccordionToggle.parentElement;
+        const body = elements.colabAccordionBody;
+        const isOpen = accordion.classList.toggle('open');
+        body.classList.toggle('hidden', !isOpen);
+      });
+    }
+
+    // Modo Demostración Switch
+    if (elements.demoModeSwitch) {
+      elements.demoModeSwitch.addEventListener('change', (e) => {
+        enableDemoMode(e.target.checked);
+      });
+    }
+
+    // Restaurar URLs por defecto
+    if (elements.resetUrlBtn) {
+      elements.resetUrlBtn.addEventListener('click', () => {
+        const defPredict = SkinAIConfig.resetPredictApiUrl();
+        const defChat    = SkinAIConfig.resetChatApiUrl();
+        if (elements.predictUrlInput) elements.predictUrlInput.value = defPredict;
+        if (elements.chatUrlInput) elements.chatUrlInput.value = defChat;
+        showConnectionFeedback('info', `URLs restauradas a los valores del entorno activo. Pulsa "Comprobar" para verificar.`);
+      });
+    }
+
+    // Guardar configuración
+    if (elements.saveApiConfigBtn) {
+      elements.saveApiConfigBtn.addEventListener('click', () => {
+        const newPredict = elements.predictUrlInput.value.trim();
+        const newChat    = elements.chatUrlInput.value.trim();
+
+        if (!newPredict || !newChat) {
+          showConnectionFeedback('error', 'Por favor ingresa una URL válida para ambos servicios.');
+          return;
+        }
+
+        SkinAIConfig.setPredictApiUrl(newPredict);
+        SkinAIConfig.setChatApiUrl(newChat);
+        closeApiModal();
+        checkApiConnectionStatus();
+      });
+    }
+  }
+
+  function handleEnvironmentChange(env) {
+    SkinAIConfig.setEnvironment(env);
+    updateEnvButtonsState();
+
+    // Actualizar inputs con los valores correspondientes
+    if (elements.predictUrlInput) {
+      elements.predictUrlInput.value = SkinAIConfig.isLocalMode() ? SkinAIConfig.LOCAL_PREDICT_URL : SkinAIConfig.PRODUCTION_PREDICT_URL;
+    }
+    if (elements.chatUrlInput) {
+      elements.chatUrlInput.value = SkinAIConfig.isLocalMode() ? SkinAIConfig.LOCAL_CHAT_URL : SkinAIConfig.PRODUCTION_CHAT_URL;
+    }
+
+    showConnectionFeedback('info', `Entorno cambiado a "${env}". Haz clic en "Comprobar ambas conexiones" o en "Guardar configuración".`);
+  }
+
+  function updateEnvButtonsState() {
+    if (!elements.envToggleGroup) return;
+    const current = SkinAIConfig.getEnvironment();
+    elements.envToggleGroup.querySelectorAll('.btn-env-opt').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.env === current);
+    });
+
+    if (elements.envActiveHint) {
+      const mode = SkinAIConfig.isLocalMode() ? 'Desarrollo Local (127.0.0.1)' : 'Producción en la Nube (Render)';
+      elements.envActiveHint.textContent = `Entorno efectivo actual: ${mode}`;
+    }
+  }
+
+  function openApiModal() {
+    if (elements.predictUrlInput) elements.predictUrlInput.value = SkinAIConfig.getPredictApiUrl();
+    if (elements.chatUrlInput) elements.chatUrlInput.value = SkinAIConfig.getChatApiUrl();
+    if (elements.demoModeSwitch) elements.demoModeSwitch.checked = state.demoMode;
+    if (elements.connectionFeedback) elements.connectionFeedback.classList.add('hidden');
+    updateEnvButtonsState();
+    elements.apiModal.classList.remove('hidden');
+  }
+
+  function closeApiModal() {
+    if (elements.apiModal) elements.apiModal.classList.add('hidden');
+  }
+
+  /**
+   * Comprueba ambas conexiones en paralelo y actualiza la retroalimentación
+   */
+  async function handleTestBothConnections() {
+    const inputPredict = elements.predictUrlInput ? elements.predictUrlInput.value.trim() : '';
+    const inputChat    = elements.chatUrlInput ? elements.chatUrlInput.value.trim() : '';
+
+    if (!inputPredict || !inputChat) {
+      showConnectionFeedback('error', 'Por favor especifica las URLs de ambos servicios antes de comprobar.');
+      return;
+    }
+
+    elements.testSpinner.classList.remove('hidden');
+    elements.testConnectionBtn.disabled = true;
+    updateBadge(elements.predictStatusBadge, 'checking', 'Probando...');
+    updateBadge(elements.chatStatusBadge, 'checking', 'Probando...');
+
+    try {
+      const [resPredict, resChat] = await Promise.all([
+        SkinAIApi.checkPredictHealth(inputPredict),
+        SkinAIApi.checkChatHealth(inputChat)
+      ]);
+
+      state.predictStatus = resPredict.ok ? 'connected' : 'disconnected';
+      state.chatStatus    = resChat.ok ? 'connected' : 'disconnected';
+
+      updateBadge(elements.predictStatusBadge, state.predictStatus, resPredict.ok ? 'Conectado' : 'Desconectado');
+      updateBadge(elements.chatStatusBadge, state.chatStatus, resChat.ok ? 'Conectado' : 'Desconectado');
+
+      if (resPredict.ok && resChat.ok) {
+        showConnectionFeedback('success', '✓ ¡Ambos servicios (Predicción y Chatbot) están en línea y saludables!');
+        updateApiStatusIndicator('connected', 'API: Conectada');
+      } else if (resPredict.ok && !resChat.ok) {
+        showConnectionFeedback('warning', '⚠️ Servicio de Predicción conectado, pero Chatbot no respondió. Si Render estaba en reposo, dale unos segundos.');
+        updateApiStatusIndicator('connected', 'API: Predicción OK');
+      } else if (!resPredict.ok && resChat.ok) {
+        showConnectionFeedback('warning', '⚠️ Servicio de Chatbot conectado, pero Predicción no respondió.');
+        updateApiStatusIndicator('connected', 'API: Chat OK');
+      } else {
+        showConnectionFeedback('error', '✕ Ninguno de los dos servicios respondió. Comprueba tu conexión o espera el arranque en frío.');
+        updateApiStatusIndicator('disconnected', 'API: Desconectada');
+      }
+
+    } catch (e) {
+      showConnectionFeedback('error', `✕ Error inesperado durante la comprobación: ${e.message}`);
+    } finally {
+      elements.testSpinner.classList.add('hidden');
+      elements.testConnectionBtn.disabled = false;
+    }
+  }
+
+  function updateBadge(badgeEl, status, text) {
+    if (!badgeEl) return;
+    badgeEl.className = `service-status-badge ${status}`;
+    badgeEl.textContent = text;
+  }
+
+  function showConnectionFeedback(type, message) {
+    if (!elements.connectionFeedback) return;
+    elements.connectionFeedback.className = `connection-feedback ${type}`;
+    elements.connectionFeedback.textContent = message;
+    elements.connectionFeedback.classList.remove('hidden');
+  }
+
+  function enableDemoMode(enabled) {
+    state.demoMode = enabled;
+    SkinAIConfig.setDemoModeEnabled(enabled);
+    if (elements.demoModeSwitch) elements.demoModeSwitch.checked = enabled;
+
+    if (enabled) {
+      updateApiStatusIndicator('demo', 'API: Modo Demo');
+      showNotification(
+        'warning',
+        'Modo Demostración Activado',
+        'La interfaz simulará resultados para pruebas visuales sin llamar al backend de FastAPI.'
+      );
+    } else {
+      checkApiConnectionStatus();
+    }
+  }
+
+  /**
+   * Consulta periódica o puntual del estado de conexión de las APIs
+   */
+  async function checkApiConnectionStatus() {
+    if (state.demoMode) {
+      updateApiStatusIndicator('demo', 'API: Modo Demo');
+      return;
+    }
+
+    updateApiStatusIndicator('checking', 'API: Verificando...');
+
+    // Comprobar salud en segundo plano
+    const resPredict = await SkinAIApi.checkPredictHealth();
+    if (resPredict.ok) {
+      updateApiStatusIndicator('connected', 'API: Conectada');
+      updateBadge(elements.predictStatusBadge, 'connected', 'Conectado');
+    } else {
+      updateApiStatusIndicator('disconnected', 'API: Desconectada');
+      updateBadge(elements.predictStatusBadge, 'disconnected', 'Desconectado');
+    }
+  }
+
+  function updateApiStatusIndicator(status, text) {
+    state.apiStatus = status;
+    if (elements.apiStatusBtn) elements.apiStatusBtn.className = `api-status-btn ${status}`;
+    if (elements.apiStatusText) elements.apiStatusText.textContent = text;
+  }
+
+  /* ==========================================================================
+     RESALTADO DE NAVEGACIÓN ACTIVA EN SCROLL
+     ========================================================================== */
+  function setupNavigationHighlight() {
+    const sections = document.querySelectorAll('main > section');
+    const navLinks = document.querySelectorAll('.nav-link');
+
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          const id = entry.target.getAttribute('id');
+          navLinks.forEach(link => {
+            const href = link.getAttribute('href');
+            if (href === `#${id}`) {
+              link.classList.add('active');
+            } else {
+              link.classList.remove('active');
+            }
+          });
+        }
+      });
+    }, {
+      rootMargin: '-30% 0px -60% 0px'
+    });
+
+    sections.forEach(section => observer.observe(section));
+  }
+
+  /* ==========================================================================
+     HELPERS Y UTILIDADES
      ========================================================================== */
   function handleCopyResults() {
     if (!state.lastResults || !state.lastResults.scores) return;
@@ -624,180 +1066,6 @@ document.addEventListener('DOMContentLoaded', () => {
     URL.revokeObjectURL(url);
   }
 
-  /* ==========================================================================
-     MODAL DE CONFIGURACIÓN Y ESTADO DE LA API
-     ========================================================================== */
-  function setupModalEvents() {
-    // Abrir modal desde header o footer
-    elements.apiStatusBtn.addEventListener('click', openApiModal);
-    elements.footerConfigBtn.addEventListener('click', openApiModal);
-
-    // Cerrar modal
-    elements.closeModalBtn.addEventListener('click', closeApiModal);
-    elements.apiModal.addEventListener('click', (e) => {
-      if (e.target === elements.apiModal) {
-        closeApiModal();
-      }
-    });
-
-    // Probar conexión dentro del modal
-    elements.testConnectionBtn.addEventListener('click', handleTestConnection);
-
-    // Acordeón de información sobre Google Colab
-    elements.colabAccordionToggle.addEventListener('click', () => {
-      const accordion = elements.colabAccordionToggle.parentElement;
-      const body = elements.colabAccordionBody;
-      const isOpen = accordion.classList.toggle('open');
-      body.classList.toggle('hidden', !isOpen);
-    });
-
-    // Toggle de modo demostración
-    elements.demoModeSwitch.addEventListener('change', (e) => {
-      enableDemoMode(e.target.checked);
-    });
-
-    // Restaurar URL por defecto
-    elements.resetUrlBtn.addEventListener('click', () => {
-      const defUrl = SkinAIConfig.resetApiBaseUrl();
-      elements.apiUrlInput.value = defUrl;
-      showConnectionFeedback('info', `URL restaurada al valor predeterminado (${defUrl}). Haz clic en "Comprobar" para verificar.`);
-    });
-
-    // Guardar configuración
-    elements.saveApiConfigBtn.addEventListener('click', () => {
-      const newUrl = elements.apiUrlInput.value.trim();
-      if (!newUrl) {
-        showConnectionFeedback('error', 'Por favor ingresa una URL válida.');
-        return;
-      }
-      SkinAIConfig.setApiBaseUrl(newUrl);
-      closeApiModal();
-      checkApiConnectionStatus();
-    });
-  }
-
-  function openApiModal() {
-    elements.apiUrlInput.value = SkinAIConfig.getApiBaseUrl();
-    elements.demoModeSwitch.checked = state.demoMode;
-    elements.connectionFeedback.classList.add('hidden');
-    elements.apiModal.classList.remove('hidden');
-    elements.apiUrlInput.focus();
-  }
-
-  function closeApiModal() {
-    elements.apiModal.classList.add('hidden');
-  }
-
-  async function handleTestConnection() {
-    const inputUrl = elements.apiUrlInput.value.trim();
-    if (!inputUrl) {
-      showConnectionFeedback('error', 'Por favor especifica una URL antes de probar.');
-      return;
-    }
-
-    elements.testSpinner.classList.remove('hidden');
-    elements.testConnectionBtn.disabled = true;
-
-    try {
-      const result = await SkinAIApi.checkHealth(inputUrl);
-
-      if (result.ok) {
-        const modelVer = result.data && (result.data.model_version || result.data.version) ? 
-          ` (${result.data.model_version})` : '';
-        showConnectionFeedback('success', `✓ ¡Conexión exitosa con FastAPI! Servidor saludable${modelVer}.`);
-        updateApiStatusIndicator('connected', 'API: Conectada');
-      } else {
-        showConnectionFeedback('error', `✕ ${result.error}`);
-        updateApiStatusIndicator('disconnected', 'API: Desconectada');
-      }
-    } catch (e) {
-      showConnectionFeedback('error', `✕ Error inesperado: ${e.message}`);
-      updateApiStatusIndicator('disconnected', 'API: Desconectada');
-    } finally {
-      elements.testSpinner.classList.add('hidden');
-      elements.testConnectionBtn.disabled = false;
-    }
-  }
-
-  function showConnectionFeedback(type, message) {
-    elements.connectionFeedback.className = `connection-feedback ${type}`;
-    elements.connectionFeedback.textContent = message;
-    elements.connectionFeedback.classList.remove('hidden');
-  }
-
-  function enableDemoMode(enabled) {
-    state.demoMode = enabled;
-    SkinAIConfig.setDemoModeEnabled(enabled);
-    elements.demoModeSwitch.checked = enabled;
-
-    if (enabled) {
-      updateApiStatusIndicator('demo', 'API: Modo Demo');
-      showNotification(
-        'warning',
-        'Modo Demostración Activado',
-        'La interfaz simulará resultados para pruebas visuales sin llamar al backend de FastAPI.'
-      );
-    } else {
-      checkApiConnectionStatus();
-    }
-  }
-
-  /**
-   * Consulta periódica o puntual del estado de conexión con la API
-   */
-  async function checkApiConnectionStatus() {
-    if (state.demoMode) {
-      updateApiStatusIndicator('demo', 'API: Modo Demo');
-      return;
-    }
-
-    updateApiStatusIndicator('checking', 'API: Verificando...');
-
-    const result = await SkinAIApi.checkHealth();
-    if (result.ok) {
-      updateApiStatusIndicator('connected', 'API: Conectada');
-    } else {
-      updateApiStatusIndicator('disconnected', 'API: Desconectada');
-    }
-  }
-
-  function updateApiStatusIndicator(status, text) {
-    state.apiStatus = status;
-    elements.apiStatusBtn.className = `api-status-btn ${status}`;
-    elements.apiStatusText.textContent = text;
-  }
-
-  /* ==========================================================================
-     RESALTADO DE NAVEGACIÓN ACTIVA EN SCROLL
-     ========================================================================== */
-  function setupNavigationHighlight() {
-    const sections = document.querySelectorAll('main > section');
-    const navLinks = document.querySelectorAll('.nav-link');
-
-    const observer = new IntersectionObserver((entries) => {
-      entries.forEach(entry => {
-        if (entry.isIntersecting) {
-          const id = entry.target.getAttribute('id');
-          navLinks.forEach(link => {
-            const href = link.getAttribute('href');
-            if (href === `#${id}`) {
-              link.classList.add('active');
-            } else {
-              link.classList.remove('active');
-            }
-          });
-        }
-      });
-    }, {
-      rootMargin: '-30% 0px -60% 0px'
-    });
-
-    sections.forEach(section => observer.observe(section));
-  }
-
-  /* ==========================================================================
-     HELPERS Y UTILIDADES
-     ========================================================================== */
   function formatBytes(bytes) {
     if (bytes === 0) return '0 Bytes';
     const k = 1024;
@@ -825,6 +1093,6 @@ document.addEventListener('DOMContentLoaded', () => {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
-  // Ejecutar arranque
+  // Iniciar ejecución
   init();
 });

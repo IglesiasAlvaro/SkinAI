@@ -1,3 +1,7 @@
+# Variables y entornos locales
+.env
+node_modules/
+
 # Archivos del sistema y temporales
 .DS_Store
 Thumbs.db

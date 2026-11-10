@@ -1,50 +1,63 @@
 # SkinAI — Frontend Web (Prototipo Académico)
 
-Aplicación web moderna, accesible y adaptable para la clasificación experimental de imágenes dermatológicas mediante el modelo de visión por computador **SkinAI v2** (basado en la arquitectura *EfficientNetB0* y entrenado con el conjunto público de datos *HAM10000*).
+Aplicación web moderna, accesible y adaptable para la clasificación experimental de imágenes dermatológicas mediante el modelo de visión por computador **SkinAI v2** (basado en la arquitectura *EfficientNetB0* y entrenado con el conjunto público de datos *HAM10000*), complementada con un asistente conversacional de orientación médica fundamentado en **RAG (Gemini + Supabase pgvector)**.
 
 ---
 
-## 🌐 Despliegues y URLs Públicas
+## 🌐 Arquitectura de Servicios y URLs
 
-El proyecto cuenta con entornos tanto en producción como en desarrollo local:
+El sistema utiliza una arquitectura desacoplada en dos servicios backend independientes:
 
-* **Frontend Web:** [https://iglesiasalvaro.github.io/SkinAI/](https://iglesiasalvaro.github.io/SkinAI/) (Desplegado en GitHub Pages).
-* **Backend FastAPI en Producción:** [https://skinai-backend-ena4.onrender.com](https://skinai-backend-ena4.onrender.com) (Desplegado en Render).
-* **Backend FastAPI en Local:** `http://127.0.0.1:8000` (Ejecutándose localmente con Uvicorn).
+### 1. Servicio de Predicción e Inferencia (`POST /predict`)
+* **Producción (Render):** `https://skinai-backend-ena4.onrender.com`
+* **Desarrollo Local:** `http://127.0.0.1:8000`
+* **Rutas:** `GET /health` (estado del modelo) y `POST /predict` (`multipart/form-data` con campo `file`).
+
+### 2. Servicio de Chatbot RAG (`POST /chat`)
+* **Producción (Render):** `https://skinai-backend-chat.onrender.com`
+* **Desarrollo Local:** `http://127.0.0.1:8001`
+* **Rutas:** `GET /health` (estado del servicio) y `POST /chat` (`application/json` con campo `question`).
+
+### 3. Frontend Web (Cliente)
+* **Producción (GitHub Pages):** [https://iglesiasalvaro.github.io/SkinAI/](https://iglesiasalvaro.github.io/SkinAI/)
+* **Origen CORS:** `https://iglesiasalvaro.github.io`
 
 > [!NOTE]
 > **Arranque en frío en Render (Free Tier):**
-> El servidor en Render entra en suspensión tras periodos de inactividad. La primera petición puede tardar entre 30 y 45 segundos mientras se levanta la máquina virtual y se carga el modelo TensorFlow en memoria. Las peticiones subsiguientes responden en 1-2 segundos. El frontend está configurado con un tiempo de espera de 75 segundos e incluye alertas visuales automáticas.
+> Los servicios gratuitos de Render entran en suspensión tras inactividad y pueden demorar entre 1 y 2 minutos en responder la primera vez. El frontend implementa:
+> 1. **Wakeup Silencioso:** Al cargar la página, se realiza un `GET /health` a ambas URLs en segundo plano para iniciar el encendido de los servidores sin mostrar errores al usuario.
+> 2. **Aviso de 8 Segundos:** Si una respuesta tarda más de 8 segundos, la interfaz informa amistosamente: *"El servidor está despertando, esto puede tardar hasta un minuto..."*.
+> 3. **Timeouts Extendidos:** Se mantiene un límite de 95 segundos (>= 90s) para asegurar que las peticiones no aborten prematuramente durante el arranque en frío.
 
 ---
 
 ## 🎯 Objetivo del Proyecto
 
-Proporcionar una interfaz gráfica intuitiva, profesional y rigurosa para estudiantes e investigadores de Ingeniería de Sistemas y ciencias de la salud. Permite seleccionar una imagen dermatoscópica, previsualizarla con validación local y enviarla mediante `multipart/form-data` al backend de **FastAPI** (`POST /predict`) para recibir y visualizar las puntuaciones Softmax de las siete clases cutáneas estudiadas.
+Proporcionar una interfaz gráfica intuitiva, profesional y rigurosa para estudiantes e investigadores de Ingeniería de Sistemas y ciencias de la salud. Permite seleccionar una imagen dermatoscópica, previsualizarla con validación local (< 10 MB) y enviarla al backend de inferencia para recibir y visualizar las puntuaciones Softmax de las siete clases cutáneas estudiadas, además de consultar dudas informativas mediante un asistente virtual RAG.
 
 ---
 
-##  Estructura del Proyecto
+## 📁 Estructura del Proyecto
 
 ```text
 SkinAI/
-├── index.html              # Estructura semántica HTML5, accesible y responsive
+├── index.html              # Estructura semántica HTML5, accesible y responsive (Analizador + Chatbot)
 ├── css/
-│   └── styles.css          # Sistema de diseño: variables CSS, paleta salud/tech, estados y animaciones
+│   └── styles.css          # Sistema de diseño: variables CSS, paleta salud/tech, widget flotante de chat
 ├── js/
-│   ├── config.js           # Configuración centralizada: URL de API, límites (10 MB) y metadatos de las 7 clases
-│   ├── api.js              # Capa de servicio aislada para FastAPI (GET /health y POST /predict)
-│   └── app.js              # Controlador de UI/UX: drag & drop, vista previa, validaciones y renderizado
+│   ├── config.js           # Configuración centralizada: PREDICT_API_URL, CHAT_API_URL, toggle local/prod
+│   ├── api.js              # Capa de comunicación HTTP: predictImage, sendChatMessage, wakeupServers
+│   └── app.js              # Controlador UI/UX: dropzone, inferencia, asistente RAG, modal de conexión
 ├── assets/
 │   └── favicon.svg         # Favicon vectorial con motivo dermatológico y de IA
-└── README.md               # Guía completa de arquitectura, ejecución y conexión con el backend
+└── README.md               # Guía completa de arquitectura, ejecución y conexión con los backends
 ```
 
 ---
 
-##  Las 7 Clases Dermatológicas Evaluadas
+## 🔬 Las 7 Clases Dermatológicas Evaluadas
 
-El modelo fue entrenado con las 7 categorías diagnósticas de HAM10000, respetando el mapeo oficial:
+El modelo fue entrenado con las 7 categorías diagnósticas de HAM10000:
 
 1. **`akiec`**: Queratosis actínica / Carcinoma intraepitelial (Bowen).
 2. **`bcc`**: Carcinoma basocelular.
@@ -58,95 +71,67 @@ El modelo fue entrenado con las 7 categorías diagnósticas de HAM10000, respeta
 
 ---
 
-##  Cómo Ejecutar la Web Localmente
+## 🚀 Cómo Ejecutar la Web Localmente
 
 La aplicación está construida con **HTML5 estándar, CSS3 moderno y JavaScript ES6 modular** sin dependencias externas pesadas, por lo que no requiere `npm install` ni compilación.
 
-### Opción 1: Abrir directamente en el navegador (La más sencilla)
-Haz doble clic sobre el archivo `index.html` o arrástralo a tu navegador web favorito (Google Chrome, Microsoft Edge, Mozilla Firefox o Safari).
+### Opción 1: Abrir directamente en el navegador
+Haz doble clic sobre `index.html` o arrástralo a tu navegador web.
 
 ### Opción 2: Usar Visual Studio Code (Live Server)
-1. Abre la carpeta `SkinAI` en Visual Studio Code.
-2. Si tienes la extensión **Live Server**, haz clic derecho en `index.html` y selecciona **Open with Live Server**.
-3. Se abrirá automáticamente en `http://127.0.0.1:5500`.
+1. Abre la carpeta `SkinAI` en VS Code.
+2. Clic derecho en `index.html` y selecciona **Open with Live Server**.
+3. Se abrirá en `http://127.0.0.1:5500`.
 
-### Opción 3: Usar un servidor HTTP simple de Python (si tienes Python en tu PC)
-Abre PowerShell o terminal en la carpeta `SkinAI` y ejecuta:
+### Opción 3: Servidor HTTP simple de Python
 ```bash
 python -m http.server 3000
 ```
-Luego abre en tu navegador: `http://localhost:3000`.
+Abre en tu navegador: `http://localhost:3000`.
 
 ---
 
-## Integración y Conexión con FastAPI
+## 🔌 Alternar entre Entorno Local y Producción
 
-La interfaz se comunica con el backend mediante dos endpoints clave:
-* `GET /health`: Comprueba el estado del servidor y del modelo cargado en memoria.
-* `POST /predict`: Envía la imagen mediante `multipart/form-data` con el campo `file` y recibe el vector de puntuaciones.
+Puedes alternar entre los servicios en la nube (Render) y los servicios locales de dos maneras sencillas:
 
-### 1. Configuración de la URL de la API
-Puedes configurar la dirección del backend de dos formas:
-* **Desde la Interfaz Gráfica:** Haz clic en el botón superior **API: Desconectada / Conectada** para abrir el modal de configuración, introduce la URL y pulsa **Comprobar** y luego **Guardar configuración** (se guarda de forma persistente en `localStorage`).
-* **En el archivo de código:** Edita `DEFAULT_API_BASE_URL` en [js/config.js](file:///c:/Users/Usuario/Desktop/SkinAI/js/config.js).
+### 1. Desde la Interfaz Gráfica (Sin tocar código)
+1. Pulsa el botón **API: Conectada / Desconectada** en la barra superior.
+2. En la sección **Entorno Activo**, selecciona:
+   - **Automático:** Detecta si estás en `localhost`/`127.0.0.1` (usa local) o en internet (usa Render).
+   - **Producción (Render):** Fuerza `https://skinai-backend-ena4.onrender.com` y `https://skinai-backend-chat.onrender.com`.
+   - **Local (127.0.0.1):** Fuerza `http://127.0.0.1:8000` y `http://127.0.0.1:8001`.
+3. Haz clic en **Comprobar ambas conexiones** para verificar el estado de salud de ambos microservicios y pulsa **Guardar configuración**.
 
----
-
-###  Importante para estudiantes: Backend en Google Colab vs. Computador Local
-
-Si el modelo y el archivo `main.py` de FastAPI se encuentran ejecutándose en una celda de **Google Colab**:
-
-> [!WARNING]
-> **El navegador de tu computadora NO puede conectarse a `http://localhost:8000` si uvicorn corre en Google Colab.**  
-> `localhost` dentro de Colab hace referencia a la máquina virtual remota en la nube de Google, no a tu computador local.
-
-Para conectar el frontend con FastAPI tienes dos alternativas:
-
-#### Alternativa A: Ejecutar FastAPI en tu computador local (Recomendado)
-1. Descarga el modelo `efficientnetb0_skinai_v2_finetuned.keras` y la carpeta `api/` a tu computadora.
-2. Instala dependencias:
-   ```bash
-   pip install fastapi uvicorn pillow numpy tensorflow python-multipart
-   ```
-3. Inicia el servidor local:
-   ```bash
-   uvicorn main:app --host 127.0.0.1 --port 8000 --reload
-   ```
-4. En el frontend, la URL por defecto `http://localhost:8000` se conectará inmediatamente.
-
-#### Alternativa B: Exponer Google Colab mediante un túnel seguro (ngrok)
-1. En tu notebook de Google Colab, instala `pyngrok`:
-   ```python
-   !pip install pyngrok uvicorn
-   ```
-2. Inicia el túnel público:
-   ```python
-   from pyngrok import ngrok
-   # Reemplaza con tu authtoken gratuito de ngrok.com si es necesario
-   # ngrok.set_auth_token("TU_TOKEN")
-   public_url = ngrok.connect(8000)
-   print(f"URL pública para el frontend: {public_url}")
-   ```
-3. Ejecuta `uvicorn main:app --port 8000` en Colab.
-4. Copia la URL pública HTTPS generada (ej. `https://xxxx.ngrok-free.app`) y pégala en el panel de configuración de la API de este frontend.
+### 2. En el archivo `js/config.js`
+En [js/config.js](file:///c:/Users/Usuario/Desktop/SkinAI/js/config.js), cambia la constante:
+```javascript
+const DEFAULT_ENVIRONMENT = 'auto'; // 'auto' | 'production' | 'local'
+```
 
 ---
 
-### Habilitar CORS en FastAPI (Requisito indispensable)
+## 🛡️ Configuración de CORS en los Backends
 
-Para que el navegador permita enviar peticiones desde `index.html` hacia la API, `main.py` debe tener configurado el middleware de CORS:
+Para que las peticiones funcionen desde el navegador, el origen exacto del frontend debe estar listado en `allow_origins` de ambos servicios FastAPI:
+
+- **GitHub Pages:** `https://iglesiasalvaro.github.io`
+- **Desarrollo local (Live Server):** `http://localhost:5500` y `http://127.0.0.1:5500`
+- **Desarrollo local (Python Server):** `http://localhost:3000` y `http://127.0.0.1:3000`
+- **Archivo local directo (`file:///`):** `"null"`
 
 ```python
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-
-app = FastAPI(title="SkinAI API")
-
-# Habilitar CORS para permitir peticiones desde el frontend web
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # En producción se restringe a dominios específicos
-    allow_credentials=True,
+    allow_origins=[
+        "http://localhost:5500",
+        "http://127.0.0.1:5500",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "null",
+        "https://iglesiasalvaro.github.io",
+    ],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -154,15 +139,6 @@ app.add_middleware(
 
 ---
 
-## Modo Demostración Académica
-
-Si aún no has iniciado el backend o estás en una presentación académica sin acceso a la GPU, puedes activar el **Modo Demostración**:
-1. Haz clic en el indicador de la API en la barra superior.
-2. Activa el interruptor **Modo Demostración Académica**.
-3. La interfaz procesará la imagen seleccionada y generará una simulación de puntuaciones para calibrar y demostrar la respuesta visual de la interfaz, etiquetando claramente el resultado como *Simulado*.
-
----
-
-##  Aviso Médico y Legal
+## ⚖️ Aviso Médico y Legal
 
 > **“SkinAI es un prototipo académico experimental y no constituye un dispositivo médico. Sus resultados no confirman ni descartan enfermedades, no sustituyen la evaluación de un profesional de salud y no deben utilizarse para decidir tratamientos. Si tienes una lesión que te preocupa, consulta a un profesional sanitario”.**

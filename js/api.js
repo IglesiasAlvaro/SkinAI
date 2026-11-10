@@ -1,80 +1,178 @@
 /**
- * SkinAI — Servicio de Comunicación con la API de FastAPI
+ * SkinAI — Servicio de Comunicación con las APIs de FastAPI
  * 
- * Este módulo gestiona de forma aislada las peticiones HTTP hacia el backend:
- * - GET  /health   : Verificación del estado del servidor y del modelo cargado.
- * - POST /predict  : Envío de la imagen en multipart/form-data y recepción de puntuaciones.
+ * Gestiona de forma modular y desacoplada las peticiones HTTP hacia los dos
+ * servicios backend:
  * 
- * Cumple con los requisitos de seguridad: validación local previa de tamaño (<10 MB),
- * control estricto de timeouts mediante AbortController y mapeo exacto de respuestas.
+ * 1. Servicio de Predicción (PREDICT_API_URL):
+ *    - GET  /health   : Verificación del estado del modelo EfficientNetB0.
+ *    - POST /predict  : Envío de imagen multipart/form-data (campo 'file').
+ * 
+ * 2. Servicio de Chatbot RAG (CHAT_API_URL):
+ *    - GET  /health   : Verificación del estado del microservicio de chat.
+ *    - POST /chat     : Envío de consulta médica informativa en JSON (campo 'question').
+ * 
+ * Reglas de conexión:
+ * - PREDICT_API_URL se utiliza exclusivamente para /predict.
+ * - CHAT_API_URL se utiliza exclusivamente para /chat.
+ * - Wakeup silencioso al arrancar para reactivar instancias gratuitas de Render.
+ * - Timeouts de 95s (>= 90s) y mapeo determinista de errores en español.
  */
 
 const SkinAIApi = (() => {
 
   /**
-   * Verifica el estado operativo de la API llamando al endpoint GET /health
+   * Mapea códigos HTTP y excepciones de red a los mensajes estándar en español:
+   * - 429: "Se alcanzó el límite gratuito de consultas. Intenta de nuevo en un minuto."
+   * - 500, 502, 503, 504: "El servicio no está disponible en este momento. Intenta de nuevo."
+   * - Sin conexión o timeout: "No se pudo conectar con el servidor."
    * 
-   * @param {string} [customBaseUrl] - URL base opcional a consultar
-   * @returns {Promise<{ok: boolean, status: number, data?: any, error?: string}>}
+   * @param {Error|any} err 
+   * @param {number} [status] 
+   * @returns {string} Mensaje de error para el usuario
    */
-  async function checkHealth(customBaseUrl) {
-    const baseUrl = customBaseUrl || SkinAIConfig.getApiBaseUrl();
+  function mapStandardErrorMessage(err, status) {
+    if (status === 429) {
+      return 'Se alcanzó el límite gratuito de consultas. Intenta de nuevo en un minuto.';
+    }
+
+    if ([500, 502, 503, 504].includes(status)) {
+      return 'El servicio no está disponible en este momento. Intenta de nuevo.';
+    }
+
+    if (err) {
+      if (err.name === 'AbortError') {
+        return 'No se pudo conectar con el servidor.';
+      }
+      const msg = (err.message || '').toLowerCase();
+      if (
+        msg.includes('failed to fetch') ||
+        msg.includes('networkerror') ||
+        msg.includes('load failed') ||
+        msg.includes('timeout') ||
+        msg.includes('no se pudo conectar')
+      ) {
+        return 'No se pudo conectar con el servidor.';
+      }
+    }
+
+    if (status && status >= 400) {
+      return 'El servicio no está disponible en este momento. Intenta de nuevo.';
+    }
+
+    return 'No se pudo conectar con el servidor.';
+  }
+
+  /**
+   * Realiza un GET silencioso a /health de AMBAS URLs para despertar los
+   * servidores gratuitos en Render, ignorando cualquier error sin mostrárselo
+   * al usuario.
+   */
+  function wakeupServers() {
+    try {
+      const predictHealthUrl = `${SkinAIConfig.getPredictApiUrl()}/health`;
+      const chatHealthUrl    = `${SkinAIConfig.getChatApiUrl()}/health`;
+
+      // Peticiones silenciosas en segundo plano (fire & forget)
+      fetch(predictHealthUrl, { method: 'GET', headers: { 'Accept': 'application/json' }, cache: 'no-store' })
+        .catch(() => { /* Silencioso: ignorar error intencionalmente */ });
+
+      fetch(chatHealthUrl, { method: 'GET', headers: { 'Accept': 'application/json' }, cache: 'no-store' })
+        .catch(() => { /* Silencioso: ignorar error intencionalmente */ });
+    } catch (_) {
+      // Silencioso
+    }
+  }
+
+  /**
+   * Comprueba la salud del servicio de Predicción
+   * 
+   * @param {string} [customBaseUrl] 
+   * @returns {Promise<{ok: boolean, status: number, data?: any, error?: string, url: string}>}
+   */
+  async function checkPredictHealth(customBaseUrl) {
+    const baseUrl = customBaseUrl || SkinAIConfig.getPredictApiUrl();
     const targetUrl = `${baseUrl}/health`;
 
     const controller = new AbortController();
-    // 45s de tiempo límite para tolerar el arranque en frío de Render si estaba inactivo
     const timeoutId = setTimeout(() => controller.abort(), 45000);
 
     try {
       const response = await fetch(targetUrl, {
         method: 'GET',
-        headers: {
-          'Accept': 'application/json'
-        },
+        headers: { 'Accept': 'application/json' },
         signal: controller.signal
       });
-
       clearTimeout(timeoutId);
 
       if (response.ok) {
         const data = await response.json();
-        return {
-          ok: true,
-          status: response.status,
-          data,
-          url: targetUrl
-        };
-      } else {
-        return {
-          ok: false,
-          status: response.status,
-          error: `El servidor respondió con código HTTP ${response.status} (${response.statusText || 'Error no especificado'}).`,
-          url: targetUrl
-        };
-      }
-    } catch (err) {
-      clearTimeout(timeoutId);
-
-      let errorMessage = 'No se pudo establecer conexión con el servidor.';
-      if (err.name === 'AbortError') {
-        errorMessage = 'Tiempo de espera agotado al consultar GET /health. Si el backend en Render estaba suspendido, el arranque en frío puede tomar hasta 50 segundos.';
-      } else if (err.message && err.message.includes('Failed to fetch')) {
-        errorMessage = `No se pudo conectar a "${targetUrl}". Verifica tu conexión y que el servidor backend esté en línea.`;
-      } else {
-        errorMessage = err.message || errorMessage;
+        return { ok: true, status: response.status, data, url: targetUrl };
       }
 
       return {
         ok: false,
+        status: response.status,
+        error: mapStandardErrorMessage(null, response.status),
+        url: targetUrl
+      };
+    } catch (err) {
+      clearTimeout(timeoutId);
+      return {
+        ok: false,
         status: 0,
-        error: errorMessage,
+        error: mapStandardErrorMessage(err, 0),
         url: targetUrl
       };
     }
   }
 
   /**
-   * Envía una imagen al endpoint POST /predict mediante multipart/form-data
+   * Comprueba la salud del servicio de Chatbot
+   * 
+   * @param {string} [customBaseUrl] 
+   * @returns {Promise<{ok: boolean, status: number, data?: any, error?: string, url: string}>}
+   */
+  async function checkChatHealth(customBaseUrl) {
+    const baseUrl = customBaseUrl || SkinAIConfig.getChatApiUrl();
+    const targetUrl = `${baseUrl}/health`;
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 45000);
+
+    try {
+      const response = await fetch(targetUrl, {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' },
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+
+      if (response.ok) {
+        const data = await response.json();
+        return { ok: true, status: response.status, data, url: targetUrl };
+      }
+
+      return {
+        ok: false,
+        status: response.status,
+        error: mapStandardErrorMessage(null, response.status),
+        url: targetUrl
+      };
+    } catch (err) {
+      clearTimeout(timeoutId);
+      return {
+        ok: false,
+        status: 0,
+        error: mapStandardErrorMessage(err, 0),
+        url: targetUrl
+      };
+    }
+  }
+
+  /**
+   * Envía una imagen al endpoint POST /predict del servicio de PREDICCIÓN
+   * Utiliza PREDICT_API_URL exclusivamente.
    * 
    * @param {File} file - Objeto de archivo de imagen seleccionado por el usuario
    * @param {string} [customBaseUrl] - URL base opcional
@@ -84,13 +182,12 @@ const SkinAIApi = (() => {
    *   modelVersion?: string,
    *   disclaimer?: string,
    *   rawResponse?: any,
-   *   error?: string
+   *   source: string
    * }>}
    */
   async function predictImage(file, customBaseUrl) {
-    // 1. Validaciones de integridad previas en el cliente
     if (!file) {
-      throw new Error('No se ha proporcionado ningún archivo para el análisis.');
+      throw new Error('Por favor selecciona primero una imagen antes de analizar.');
     }
 
     if (file.size > SkinAIConfig.MAX_FILE_SIZE_BYTES) {
@@ -104,19 +201,18 @@ const SkinAIApi = (() => {
     const hasValidMime = SkinAIConfig.ALLOWED_MIME_TYPES.includes(fileType);
 
     if (!hasValidExt && !hasValidMime) {
-      throw new Error('Formato de archivo no compatible. Por favor sube una imagen en formato JPEG, JPG o PNG.');
+      throw new Error('Formato de archivo no compatible. Solo se admiten imágenes en formato JPEG, JPG o PNG.');
     }
 
-    const baseUrl = customBaseUrl || SkinAIConfig.getApiBaseUrl();
+    // Usar PREDICT_API_URL exclusivamente para /predict
+    const baseUrl = customBaseUrl || SkinAIConfig.getPredictApiUrl();
     const targetUrl = `${baseUrl}/predict`;
 
-    // 2. Construcción de carga útil multipart/form-data
-    // Tal como espera FastAPI: file: UploadFile = File(...)
     const formData = new FormData();
     formData.append('file', file, file.name);
 
-    // 3. Petición HTTP con timeout controlado
     const controller = new AbortController();
+    // Timeout de 95 segundos (al menos 90 segundos para tolerar arranque en frío)
     const timeoutId = setTimeout(() => controller.abort(), SkinAIConfig.REQUEST_TIMEOUT_MS);
 
     try {
@@ -125,36 +221,19 @@ const SkinAIApi = (() => {
         body: formData,
         headers: {
           'Accept': 'application/json'
-          // IMPORTANTE: NO fijar 'Content-Type': el navegador calcula automáticamente
-          // multipart/form-data con el delimitador boundary correspondiente.
         },
         signal: controller.signal
       });
 
       clearTimeout(timeoutId);
 
-      // Manejo específico de códigos de estado HTTP
       if (!response.ok) {
-        let serverErrorDetail = '';
-        try {
-          const errorJson = await response.json();
-          serverErrorDetail = errorJson.detail || errorJson.message || JSON.stringify(errorJson);
-        } catch (_) {
-          serverErrorDetail = await response.text();
-        }
-
-        if (response.status === 413) {
-          throw new Error('El servidor rechazó la imagen porque excede el límite de 10 MB (HTTP 413 Payload Too Large).');
-        } else if (response.status === 400) {
-          throw new Error(`El servidor rechazó la imagen (HTTP 400 Bad Request): ${serverErrorDetail || 'Archivo dañado o formato no soportado por PIL/TensorFlow.'}`);
-        } else if (response.status === 500) {
-          throw new Error(`Error interno en el backend de FastAPI (HTTP 500): ${serverErrorDetail || 'Fallo durante la ejecución de model.predict().'}`);
-        } else {
-          throw new Error(`Error de la API (HTTP ${response.status}): ${serverErrorDetail || response.statusText}`);
-        }
+        const errorMsg = mapStandardErrorMessage(null, response.status);
+        const err = new Error(errorMsg);
+        err.status = response.status;
+        throw err;
       }
 
-      // 4. Parseo y normalización de la respuesta
       const jsonResponse = await response.json();
       const parsedData = normalizeInferenceResponse(jsonResponse);
 
@@ -170,37 +249,96 @@ const SkinAIApi = (() => {
     } catch (err) {
       clearTimeout(timeoutId);
 
-      if (err.name === 'AbortError') {
-        throw new Error(`Tiempo de espera agotado (${SkinAIConfig.REQUEST_TIMEOUT_MS / 1000}s). Si el backend en Render estaba suspendido, el arranque en frío puede demorar unos segundos adicionales. Por favor reintenta ahora que ya está activo.`);
+      // Si el error ya fue formateado con el mensaje estándar, propagarlo
+      if (err.status) {
+        throw err;
       }
 
-      // Si es un error de conexión de red típico del navegador
-      if (err.message && (err.message.includes('Failed to fetch') || err.message.includes('NetworkError'))) {
-        throw new Error(
-          `No se pudo conectar con el servidor en "${targetUrl}". ` +
-          `Verifica tu conexión a internet o si el backend está iniciando.`
-        );
-      }
-
-      throw err;
+      const mappedMsg = mapStandardErrorMessage(err, 0);
+      const standardErr = new Error(mappedMsg);
+      standardErr.original = err;
+      throw standardErr;
     }
   }
 
   /**
-   * Normaliza la estructura JSON recibida de main.py
-   * Soporta tanto { class_scores: {...} } como { predictions: {...} }
-   * garantizando que los valores numéricos se ordenen de mayor a menor sin modificarlos.
+   * Envía una pregunta al endpoint POST /chat del servicio de CHATBOT RAG
+   * Utiliza CHAT_API_URL exclusivamente.
+   * 
+   * @param {string} question - Texto de la consulta del usuario
+   * @param {string} [customBaseUrl] - URL base opcional
+   * @returns {Promise<{
+   *   success: boolean,
+   *   answer: string,
+   *   sources: string[]
+   * }>}
+   */
+  async function sendChatMessage(question, customBaseUrl) {
+    const cleanQuestion = (question || '').trim();
+    if (!cleanQuestion || cleanQuestion.length < 3) {
+      throw new Error('Por favor formula una pregunta de al menos 3 caracteres.');
+    }
+
+    // Usar CHAT_API_URL exclusivamente para /chat
+    const baseUrl = customBaseUrl || SkinAIConfig.getChatApiUrl();
+    const targetUrl = `${baseUrl}/chat`;
+
+    const controller = new AbortController();
+    // Timeout de 95 segundos (al menos 90 segundos)
+    const timeoutId = setTimeout(() => controller.abort(), SkinAIConfig.REQUEST_TIMEOUT_MS);
+
+    try {
+      const response = await fetch(targetUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify({ question: cleanQuestion }),
+        signal: controller.signal
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        const errorMsg = mapStandardErrorMessage(null, response.status);
+        const err = new Error(errorMsg);
+        err.status = response.status;
+        throw err;
+      }
+
+      const data = await response.json();
+      return {
+        success: true,
+        answer: data.answer || 'No se recibió respuesta del modelo.',
+        sources: Array.isArray(data.sources) ? data.sources : []
+      };
+
+    } catch (err) {
+      clearTimeout(timeoutId);
+
+      if (err.status) {
+        throw err;
+      }
+
+      const mappedMsg = mapStandardErrorMessage(err, 0);
+      const standardErr = new Error(mappedMsg);
+      standardErr.original = err;
+      throw standardErr;
+    }
+  }
+
+  /**
+   * Normaliza la estructura JSON de inferencia recibida del modelo
    */
   function normalizeInferenceResponse(responseJson) {
     if (!responseJson || typeof responseJson !== 'object') {
       throw new Error('La respuesta devuelta por la API no es un objeto JSON válido.');
     }
 
-    // Identificar el campo que contiene el mapa o array de puntuaciones
     let scoresRaw = responseJson.class_scores || responseJson.predictions || responseJson.scores;
 
     if (!scoresRaw && typeof responseJson === 'object') {
-      // Si la API devolvió directamente el diccionario { akiec: 0.05, nv: 0.8, ... }
       const sampleKeys = Object.keys(responseJson);
       const hasDermKeys = sampleKeys.some(k => SkinAIConfig.CLASSES_METADATA[k.toLowerCase()]);
       if (hasDermKeys) {
@@ -209,14 +347,12 @@ const SkinAIApi = (() => {
     }
 
     if (!scoresRaw) {
-      throw new Error('La respuesta de la API no contiene los campos esperados "class_scores" ni "predictions".');
+      throw new Error('La respuesta de la API no contiene las puntuaciones esperadas.');
     }
 
-    // Convertir a un arreglo ordenado de objetos: [{ code, score }]
     const scoresArray = [];
 
     if (Array.isArray(scoresRaw)) {
-      // Formato array: [{ class: 'nv', score: 0.8 }, ...]
       scoresRaw.forEach(item => {
         const code = (item.class || item.label || item.code || '').toLowerCase();
         const score = typeof item.score === 'number' ? item.score : parseFloat(item.score);
@@ -225,7 +361,6 @@ const SkinAIApi = (() => {
         }
       });
     } else if (typeof scoresRaw === 'object') {
-      // Formato diccionario clave-valor: { "nv": 0.823, "mel": 0.041, ... }
       for (const [key, val] of Object.entries(scoresRaw)) {
         const code = key.toLowerCase();
         const score = typeof val === 'number' ? val : parseFloat(val);
@@ -235,10 +370,8 @@ const SkinAIApi = (() => {
       }
     }
 
-    // Ordenar de mayor a menor puntuación de forma estricta y determinista
     scoresArray.sort((a, b) => b.score - a.score);
 
-    // Asignar posición de ranking (1 a 7)
     const rankedScores = scoresArray.map((item, idx) => ({
       ...item,
       rank: idx + 1
@@ -252,11 +385,9 @@ const SkinAIApi = (() => {
   }
 
   /**
-   * Genera un conjunto de datos de demostración claramente etiquetados
-   * Exclusivamente para pruebas y calibración visual de la interfaz cuando el backend no está disponible.
+   * Genera puntuaciones simuladas para calibración visual en Modo Demostración
    */
   function generateDemoScores() {
-    // Puntuaciones de muestra realistas de una lesión benigna tipo nevo
     const sampleScores = [
       { code: 'nv', score: 0.6842 },
       { code: 'bkl', score: 0.1421 },
@@ -279,10 +410,15 @@ const SkinAIApi = (() => {
   }
 
   return {
-    checkHealth,
+    wakeupServers,
+    checkPredictHealth,
+    checkChatHealth,
+    checkHealth: checkPredictHealth, // Retrocompatibilidad
     predictImage,
+    sendChatMessage,
     normalizeInferenceResponse,
-    generateDemoScores
+    generateDemoScores,
+    mapStandardErrorMessage
   };
 })();
 
